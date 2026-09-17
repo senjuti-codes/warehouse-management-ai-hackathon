@@ -12,4 +12,5 @@ export type ApprovalItem = {
   detected: string
   status: ApprovalStatus
   comment?: string
+  recommendationSource?: "deterministic-rule" | "llm"
 }

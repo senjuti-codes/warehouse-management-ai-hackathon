@@ -326,7 +326,7 @@ export function ApprovalsPage() {
               Approvals
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Review AI recommendations before corrective action.
+              Review rule-based recommendations before corrective action. Generate LLM analysis from an individual investigation when configured.
             </p>
           </section>
           <section className="grid gap-4 md:grid-cols-3">
@@ -406,7 +406,7 @@ export function ApprovalsPage() {
             <div className="mb-3 flex items-end justify-between">
               <div>
                 <h3 className="text-base font-semibold">
-                  AI recommendation queue
+                  Recommendation queue
                 </h3>
                 <p className="mt-1 text-xs text-slate-400">
                   {filteredItems.length} of {items.length} recommendations shown
@@ -416,7 +416,7 @@ export function ApprovalsPage() {
                 variant="outline"
                 className="hidden border-[#d8f36b] bg-[#f5fbdc] text-[#667d16] sm:flex"
               >
-                <Sparkles className="size-3" /> AI-ranked by impact
+                <Sparkles className="size-3" /> Rule-ranked by impact
               </Badge>
             </div>
             <div className="space-y-3">
@@ -441,8 +441,7 @@ export function ApprovalsPage() {
                         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                           <div className="sm:col-span-2 lg:col-span-2">
                             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                              <Sparkles className="size-3 text-[#839e24]" /> AI
-                              recommendation
+                              <Sparkles className="size-3 text-[#839e24]" /> {item.recommendationSource === "llm" ? "AI recommendation" : "Rule recommendation"}
                             </div>
                             <p className="mt-1 text-sm leading-6 text-slate-600">
                               {item.recommendation}

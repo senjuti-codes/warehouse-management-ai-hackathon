@@ -3,6 +3,7 @@ import { db, initializeDatabase } from './db.ts';
 import { appConfig } from './config.ts';
 import { ingestWorkbook } from './services/ingestionService.ts';
 import { runDetection } from './services/ruleEngine.ts';
+import { analyzeAnomalyWithLlm } from './services/llmService.ts';
 
 const parseBody = async (req: import('node:http').IncomingMessage) => {
   const chunks: Buffer[] = [];
@@ -103,7 +104,12 @@ export const createApiServer = (port: number) => {
          FROM anomalies a LEFT JOIN anomaly_decisions d ON d.anomaly_id = a.id
          ORDER BY a.created_at DESC`,
       ).all() as Array<Record<string, unknown>>;
-      const enriched = rows.map((row) => ({ ...row, ...recommendationFor(String(row.type)) }));
+      const enriched = rows.map((row) => ({
+        ...row,
+        ...recommendationFor(String(row.type)),
+        recommendation_source: 'deterministic-rule',
+        ai_analysis_available: false,
+      }));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(enriched));
       return;
@@ -162,6 +168,31 @@ export const createApiServer = (port: number) => {
       ).run(anomalyId, status, comment);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true, anomalyId, status, comment }));
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/anomalies/') && url.pathname.endsWith('/ai-analysis')) {
+      const anomalyId = Number(url.pathname.split('/')[3]);
+      const row = db.prepare('SELECT * FROM anomalies WHERE id = ?').get(anomalyId) as Record<string, unknown> | undefined;
+      if (!row) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: 'Anomaly not found.' }));
+        return;
+      }
+      try {
+        const recommendation = recommendationFor(String(row.type));
+        const analysis = await analyzeAnomalyWithLlm({
+          id: Number(row.id), type: String(row.type), severity: String(row.severity), sheet: String(row.sheet),
+          message: String(row.message), evidence: row.evidence ? String(row.evidence) : null,
+          business_key: row.business_key ? String(row.business_key) : null,
+          deterministic_recommendation: recommendation.recommendation,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, analysis }));
+      } catch (error) {
+        res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: error instanceof Error ? error.message : 'LLM analysis failed.' }));
+      }
       return;
     }
 
