@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: warehouse
+      POSTGRES_PASSWORD: warehouse
+      POSTGRES_DB: warehouse_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warehouse -d warehouse_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Overrides .env's DATABASE_URL host so it always points at the
+      # compose network's postgres service, regardless of what's in .env.
+      DATABASE_URL: postgresql+psycopg2://warehouse:warehouse@postgres:5432/warehouse_ai
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Uncomment once your Next.js app has its own Dockerfile.
+  # frontend:
+  #   build: ./frontend
+  #   restart: unless-stopped
+  #   environment:
+  #     NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - backend
+
+volumes:
+  pgdata:
