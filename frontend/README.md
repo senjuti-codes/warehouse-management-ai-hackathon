@@ -1,5 +1,27 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Backend API configuration
+
+This app talks to the FastAPI backend in `../backend` through the typed
+client in `lib/api.ts`. Copy the example env file and point it at your
+backend:
+
+```bash
+cp .env.local.example .env.local
+```
+
+`NEXT_PUBLIC_API_BASE_URL` defaults to `http://localhost:8000/api/v1` for
+local dev. For a deployed environment (e.g. both apps running on the same
+EC2 instance), change it to the instance's public IP or domain:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://<EC2-PUBLIC-IP>:8000/api/v1
+```
+
+Note this value is baked in at build time (it's a `NEXT_PUBLIC_*` var), so
+rebuild the frontend after changing it. Never put LLM/API secret keys here —
+only the backend talks to the LLM provider.
+
 ## Getting Started
 
 First, run the development server:
