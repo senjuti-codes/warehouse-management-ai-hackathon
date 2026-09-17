@@ -20,6 +20,7 @@ type BackendAnomaly = {
   recommendation: string
   category: string
   confidence: number
+  recommendation_source?: "deterministic-rule" | "llm"
   decision_status?: "approved" | "rejected"
   decision_comment?: string | null
   created_at?: string
@@ -36,6 +37,7 @@ const toApprovalItem = (anomaly: BackendAnomaly): ApprovalItem => ({
   detected: anomaly.created_at ? new Date(anomaly.created_at).toLocaleString() : "Recently",
   status: anomaly.decision_status === "approved" ? "Approved" : anomaly.decision_status === "rejected" ? "Rejected" : "Pending approval",
   comment: anomaly.decision_comment ?? undefined,
+  recommendationSource: anomaly.recommendation_source ?? "deterministic-rule",
 })
 
 const ApprovalContext = createContext<ApprovalContextValue | null>(null)

@@ -61,10 +61,11 @@ const insertRows = (tableName: string, headers: string[], rows: Record<string, u
 
 export const ingestWorkbook = async (filePath: string) => {
   initializeDatabase();
-  resetAnomalies();
 
   const profile = await readWorkbook(filePath);
   const validation = validateWorkbookProfile(profile);
+
+  resetAnomalies();
 
   const runsStmt = db.prepare(
     'INSERT INTO workbook_runs (source_file, total_sheets, total_rows, valid) VALUES (?, ?, ?, ?)',

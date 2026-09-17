@@ -228,8 +228,7 @@ function ImpactSection() {
           />
         </div>
         <div className="flex items-center gap-2 border-t border-white/10 pt-4 text-xs text-white/55">
-          <Zap className="size-3.5 text-[#d8f36b]" /> 14 recommendations ready
-          to prevent €42k in avoidable cost
+          <Zap className="size-3.5 text-[#d8f36b]" /> Rule-based recommendations are ready for operator review
         </div>
       </CardContent>
     </Card>
@@ -689,17 +688,17 @@ export function ControlTowerDashboard() {
                   </TabsContent>
                   <TabsContent value="critical">
                     <p className="py-12 text-center text-sm text-slate-500">
-                      7 critical anomalies require immediate attention.
+                      Review critical anomalies from the live workbook scan.
                     </p>
                   </TabsContent>
                   <TabsContent value="high">
                     <p className="py-12 text-center text-sm text-slate-500">
-                      23 high-risk anomalies are being monitored.
+                      Review high-risk anomalies from the live workbook scan.
                     </p>
                   </TabsContent>
                   <TabsContent value="review">
                     <p className="py-12 text-center text-sm text-slate-500">
-                      14 recommendations are waiting for approval.
+                      Review recommendations waiting for operator approval.
                     </p>
                   </TabsContent>
                 </Tabs>
