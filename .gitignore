@@ -1,0 +1,6 @@
+node_modules/
+.next/
+backend/warehouse_ai.sqlite
+backend/*.sqlite
+backend/.env
+frontend/.env.local

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -18,12 +18,8 @@ import {
   Warehouse,
   Boxes,
 } from "lucide-react";
-import {
-  dispatchRecords,
-  type DispatchRecord,
-  type DispatchRisk,
-  type DispatchStatus,
-} from "@/data/dispatch-flow";
+import { type DispatchRecord, type DispatchRisk, type DispatchStatus } from "@/data/dispatch-flow";
+import { fetchWorkbookTable } from "@/lib/workbook-api";
 import { Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,49 +53,6 @@ const riskClasses: Record<DispatchRisk, string> = {
   High: "border-orange-200 bg-orange-50 text-orange-700",
   Medium: "border-amber-200 bg-amber-50 text-amber-700",
   Low: "border-slate-200 bg-slate-50 text-slate-600",
-};
-
-const timelineStages: Record<string, string[]> = {
-  "D-10744": [
-    "Order confirmed",
-    "Picking",
-    "Packed",
-    "Loaded",
-    "In transit",
-    "Delivered",
-  ],
-  "D-10821": [
-    "Order confirmed",
-    "Picking",
-    "Packed",
-    "In transit",
-    "Delivered",
-  ],
-  "D-10835": ["Order confirmed", "Picking", "Packed", "Loaded", "Delivered"],
-  "D-10842": [
-    "Order confirmed",
-    "Picking",
-    "Packed",
-    "Loaded",
-    "In transit",
-    "Delivered",
-  ],
-  "D-10851": [
-    "Order confirmed",
-    "Picking",
-    "Packed",
-    "Loaded",
-    "In transit",
-    "Delivered",
-  ],
-};
-
-const timelineCurrentStages: Record<string, string> = {
-  "D-10744": "In transit",
-  "D-10821": "In transit",
-  "D-10835": "Delivered",
-  "D-10842": "In transit",
-  "D-10851": "Loaded",
 };
 
 function StatusBadge({ status }: Readonly<{ status: DispatchStatus }>) {
@@ -162,8 +115,8 @@ function SummaryCard({
 function DispatchTimeline({
   dispatch,
 }: Readonly<{ dispatch: DispatchRecord }>) {
-  const labels = timelineStages[dispatch.delivery] ?? timelineStages["D-10744"];
-  const currentStage = timelineCurrentStages[dispatch.delivery] ?? "In transit";
+  const labels = ["Order confirmed", "Picking", "Packed", "Loaded", "In transit", "Delivered"];
+  const currentStage = dispatch.status === "Ready" ? "Loaded" : dispatch.status === "On schedule" ? "Delivered" : dispatch.status === "Delayed" || dispatch.status === "At risk" ? "In transit" : "In transit";
   const currentIndex = labels.indexOf(currentStage);
   const steps = labels.map((label) => {
     let icon: typeof Check | typeof AlertTriangle | null = Check;
@@ -174,7 +127,7 @@ function DispatchTimeline({
     }
     return { label, icon };
   });
-  const isSelectedRisk = dispatch.delivery === "D-10744";
+  const isSelectedRisk = dispatch.risk === "Critical" || dispatch.risk === "High";
   return (
     <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
       <CardHeader className="px-5 pb-3 pt-5">
@@ -386,13 +339,28 @@ function DispatchTable({
 }
 
 export function DispatchFlowPage() {
+  const [dispatchRecords, setDispatchRecords] = useState<DispatchRecord[]>([]);
   const [search, setSearch] = useState("");
   const [warehouse, setWarehouse] = useState("all");
   const [status, setStatus] = useState("all");
   const [risk, setRisk] = useState("all");
-  const [selectedDelivery, setSelectedDelivery] = useState<DispatchRecord>(
-    dispatchRecords[0],
-  );
+  const [selectedDelivery, setSelectedDelivery] = useState<DispatchRecord | null>(null);
+  useEffect(() => {
+    Promise.all([fetchWorkbookTable("deliveries_dispatch"), fetchWorkbookTable("material_master"), fetchWorkbookTable("inventory_stock")]).then(([deliveries, materials, inventory]) => {
+      const names = new Map(materials.rows.map((row) => [String(row.material ?? ""), String(row.description ?? "Unknown material")]));
+      const stock = new Map(inventory.rows.map((row) => [`${row.material}|${row.plant}`, Number(row.qty_on_hand ?? 0)]));
+      const records = deliveries.rows.map((row) => {
+        const orderQty = Number(row.order_qty ?? 0);
+        const available = stock.get(`${row.material}|${row.plant}`) ?? 0;
+        const rawStatus = String(row.status ?? "").toUpperCase();
+        const status: DispatchStatus = rawStatus.includes("DELAY") ? "Delayed" : rawStatus.includes("TRANSIT") ? "In transit" : rawStatus.includes("READY") ? "Ready" : "On schedule";
+        const risk: DispatchRisk = orderQty > available && available > 0 ? "Critical" : status === "Delayed" ? "High" : "Low";
+        return { delivery: String(row.delivery ?? ""), material: String(row.material ?? ""), materialName: names.get(String(row.material ?? "")) ?? "Unknown material", warehouse: String(row.plant ?? "Unknown plant"), quantity: `${orderQty} EA`, eta: String(row.planned_gi_date ?? "Not provided"), status, risk };
+      });
+      setDispatchRecords(records);
+      setSelectedDelivery(records[0] ?? null);
+    }).catch(() => { setDispatchRecords([]); setSelectedDelivery(null); });
+  }, []);
   const filteredRecords = useMemo(
     () =>
       dispatchRecords.filter((record) => {
@@ -455,34 +423,34 @@ export function DispatchFlowPage() {
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
               label="Today's deliveries"
-              value="128"
-              detail="Across all warehouses"
+              value={String(dispatchRecords.length)}
+              detail="From Deliveries_Dispatch"
               icon={Truck}
               tone="bg-blue-50 text-blue-600"
             />
             <SummaryCard
               label="On schedule"
-              value="104"
-              detail="81% of today's dispatches"
+              value={String(dispatchRecords.filter((record) => record.status === "On schedule").length)}
+              detail="Current workbook status"
               icon={CheckCircle2}
               tone="bg-emerald-50 text-emerald-600"
             />
             <SummaryCard
               label="At risk"
-              value="17"
+              value={String(dispatchRecords.filter((record) => record.status === "At risk" || record.risk === "Critical" || record.risk === "High").length)}
               detail="Requires attention"
               icon={AlertTriangle}
               tone="bg-amber-50 text-amber-600"
             />
             <SummaryCard
               label="Delayed"
-              value="7"
+              value={String(dispatchRecords.filter((record) => record.status === "Delayed").length)}
               detail="Needs intervention"
               icon={Clock3}
               tone="bg-red-50 text-red-600"
             />
           </section>
-          <DispatchTimeline dispatch={selectedDelivery} />
+          {selectedDelivery ? <DispatchTimeline dispatch={selectedDelivery} /> : <Card className="border-0 bg-white shadow-sm"><CardContent className="p-8 text-center text-sm text-slate-400">No dispatch records are available from the workbook.</CardContent></Card>}
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.7fr)]">
             <div className="space-y-3">
               <div className="flex items-end justify-between">
@@ -514,7 +482,7 @@ export function DispatchFlowPage() {
                   label="Warehouse"
                   value={warehouse}
                   onChange={setWarehouse}
-                  options={["WH-01", "WH-02", "WH-03", "WH-04"]}
+                  options={[...new Set(dispatchRecords.map((record) => record.warehouse))]}
                 />
                 <FilterSelect
                   label="Status"
@@ -537,7 +505,7 @@ export function DispatchFlowPage() {
               </div>
               <DispatchTable
                 records={filteredRecords}
-                selectedDelivery={selectedDelivery.delivery}
+                selectedDelivery={selectedDelivery?.delivery ?? ""}
                 onSelect={setSelectedDelivery}
               />
             </div>
@@ -558,18 +526,17 @@ export function DispatchFlowPage() {
                 </CardHeader>
                 <CardContent className="p-5">
                   <p className="text-lg font-semibold">
-                    17 deliveries are currently at risk.
+                    {dispatchRecords.filter((record) => record.risk === "Critical" || record.risk === "High").length} deliveries are currently at risk.
                   </p>
                   <div className="mt-5 space-y-4 text-sm leading-6 text-white/65">
                     <p className="border-l-2 border-red-400 pl-3">
-                      Delivery D-10744 may miss its commitment by 18 hrs because
-                      available stock is 60 EA below the requested quantity.
+                      {dispatchRecords.filter((record) => record.risk === "Critical").length} deliveries exceed available stock in the current inventory snapshot.
                     </p>
                     <p className="border-l-2 border-amber-300 pl-3">
-                      4 deliveries share the same warehouse capacity constraint.
+                      Dispatch risk is calculated from Deliveries_Dispatch and Inventory_Stock joins.
                     </p>
                     <p className="border-l-2 border-orange-300 pl-3">
-                      7 delayed deliveries require operator review.
+                      {dispatchRecords.filter((record) => record.status === "Delayed").length} delayed deliveries require operator review.
                     </p>
                   </div>
                   <Link
@@ -597,7 +564,7 @@ export function DispatchFlowPage() {
                         Critical
                       </Badge>
                       <span className="font-mono text-xs text-red-700">
-                        D-10744
+                        {dispatchRecords.find((record) => record.risk === "Critical")?.delivery ?? "No critical delivery"}
                       </span>
                     </div>
                     <p className="mt-2 text-sm font-medium text-[#17211f]">

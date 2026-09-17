@@ -1,0 +1,11 @@
+{
+  "name": "warehouse-ai-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "inspect": "node --experimental-strip-types src/scripts/inspectWorkbook.ts"
+  }
+}

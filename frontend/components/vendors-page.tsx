@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -15,12 +15,8 @@ import {
   Truck,
   Users,
 } from "lucide-react";
-import {
-  vendors,
-  type VendorRecord,
-  type VendorRisk,
-  type VendorStatus,
-} from "@/data/vendors";
+import { type VendorRecord, type VendorRisk, type VendorStatus } from "@/data/vendors";
+import { fetchWorkbookTable } from "@/lib/workbook-api";
 import { Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -227,9 +223,19 @@ function VendorTable({ records }: Readonly<{ records: VendorRecord[] }>) {
 }
 
 export function VendorsPage() {
+  const [vendors, setVendors] = useState<VendorRecord[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [risk, setRisk] = useState("all");
+  useEffect(() => {
+    fetchWorkbookTable("vendor_master").then(({ rows }) => setVendors(rows.map((row) => {
+      const onTimeRate = Number(row.on_time_delivery ?? 0);
+      const blocked = String(row.procurement_block ?? "").toUpperCase() === "Y";
+      const status: VendorStatus = blocked ? "Blocked" : onTimeRate < 90 ? "At risk" : "Healthy";
+      const risk: VendorRisk = blocked ? "Critical" : onTimeRate < 80 ? "High" : onTimeRate < 90 ? "Medium" : "Low";
+      return { id: String(row.vendor ?? ""), name: String(row.vendor_name ?? "Unknown vendor"), region: String(row.country ?? "Unknown"), category: "Workbook vendor", openOrders: 0, onTimeRate, leadTime: "Not provided", status, risk, spend: "Not calculated", nextDelivery: "Not provided" };
+    }))).catch(() => setVendors([]));
+  }, []);
   const filteredVendors = useMemo(
     () =>
       vendors.filter((vendor) => {
@@ -291,28 +297,28 @@ export function VendorsPage() {
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
               label="Active vendors"
-              value="42"
-              detail="Across 6 procurement categories"
+              value={String(vendors.length)}
+              detail="From Vendor_Master"
               icon={Users}
               tone="bg-blue-50 text-blue-600"
             />
             <SummaryCard
               label="Healthy vendors"
-              value="31"
-              detail="74% of active suppliers"
+              value={String(vendors.filter((vendor) => vendor.status === "Healthy").length)}
+              detail="Within workbook thresholds"
               icon={CheckCircle2}
               tone="bg-emerald-50 text-emerald-600"
             />
             <SummaryCard
               label="At risk"
-              value="08"
+              value={String(vendors.filter((vendor) => vendor.status === "At risk").length).padStart(2, "0")}
               detail="Reliability needs attention"
               icon={AlertTriangle}
               tone="bg-amber-50 text-amber-600"
             />
             <SummaryCard
               label="Blocked"
-              value="03"
+              value={String(vendors.filter((vendor) => vendor.status === "Blocked").length).padStart(2, "0")}
               detail="Open commitments exposed"
               icon={ShieldAlert}
               tone="bg-red-50 text-red-600"
@@ -377,18 +383,17 @@ export function VendorsPage() {
                 </CardHeader>
                 <CardContent className="p-5">
                   <p className="text-lg font-semibold">
-                    3 suppliers require immediate review.
+                    {vendors.filter((vendor) => vendor.status !== "Healthy").length} suppliers require review.
                   </p>
                   <div className="mt-5 space-y-4 text-sm leading-6 text-white/65">
                     <p className="border-l-2 border-red-400 pl-3">
-                      V-044 is blocked while 5 purchase orders remain open.
+                      {vendors.filter((vendor) => vendor.status === "Blocked").length} suppliers are procurement-blocked in Vendor_Master.
                     </p>
                     <p className="border-l-2 border-amber-300 pl-3">
-                      V-018 has a 62% on-time rate and 8 open orders.
+                      {vendors.filter((vendor) => vendor.onTimeRate < 90).length} suppliers are below the 90% on-time threshold.
                     </p>
                     <p className="border-l-2 border-orange-300 pl-3">
-                      12 deliveries depend on suppliers with elevated lead-time
-                      risk.
+                      Lead-time data is not provided by the current workbook schema.
                     </p>
                   </div>
                   <Link
