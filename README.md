@@ -1,4 +1,4 @@
-# Warehouse AI Control Center — backend starter
+# Warehouse AI Control Center
 
 Agentic data-quality control center for the Warehouse AI hackathon: ingests
 the 6-sheet SAP-style workbook, runs deterministic anomaly detection,
@@ -7,9 +7,15 @@ scores business impact, proposes a corrective action, and pauses for human
 approval before anything is "executed." Everything is logged to an
 append-only audit trail.
 
-This repo is the **backend only**. The Next.js frontend is a separate app
-that talks to this API — see `docs/API.md`-equivalent at `/docs` once the
-server is running (FastAPI auto-generates it).
+The repository includes the Node.js/TypeScript backend and Next.js frontend.
+The authoritative workbook is committed at
+`data/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL.xlsx`. The backend uses
+that file by default, while `WORKBOOK_PATH` can override it for another
+dataset.
+
+Start the backend from `backend/` with `npm start`, then start the frontend
+from `frontend/` with `npm run dev`. Open `http://localhost:3000` for the
+application; it reads workbook-backed data from the API on port 8000.
 
 ## Architecture at a glance
 

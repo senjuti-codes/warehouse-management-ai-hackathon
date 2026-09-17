@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -42,53 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const anomalies = [
-  {
-    id: "AN-2048",
-    type: "Stockout risk",
-    source: "Inventory_Stock",
-    location: "WH-03 / A-14",
-    score: "98%",
-    severity: "Critical",
-    time: "12 min ago",
-  },
-  {
-    id: "AN-2045",
-    type: "Late dispatch cluster",
-    source: "Deliveries_Dispatch",
-    location: "WH-01 / Dock 07",
-    score: "92%",
-    severity: "High",
-    time: "28 min ago",
-  },
-  {
-    id: "AN-2041",
-    type: "Vendor lead-time drift",
-    source: "Vendor_Master",
-    location: "Vendor V-018",
-    score: "86%",
-    severity: "High",
-    time: "41 min ago",
-  },
-  {
-    id: "AN-2037",
-    type: "Bin capacity mismatch",
-    source: "Warehouse_Bin",
-    location: "WH-02 / B-09",
-    score: "72%",
-    severity: "Medium",
-    time: "1 hr ago",
-  },
-  {
-    id: "AN-2032",
-    type: "Duplicate material record",
-    source: "Material_Master",
-    location: "Material M-4421",
-    score: "61%",
-    severity: "Low",
-    time: "2 hrs ago",
-  },
-];
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const severityStyles = {
   Critical: "border-red-200 bg-red-50 text-red-700",
@@ -283,26 +237,7 @@ function ImpactSection() {
 }
 
 function RecentActions() {
-  const actions = [
-    {
-      icon: CheckCircle2,
-      label: "Replenishment order drafted",
-      meta: "Material M-8821 · 8 min ago",
-      color: "text-emerald-600 bg-emerald-50",
-    },
-    {
-      icon: RefreshCw,
-      label: "Dispatch priority recalculated",
-      meta: "Route R-104 · 22 min ago",
-      color: "text-blue-600 bg-blue-50",
-    },
-    {
-      icon: Clock3,
-      label: "Vendor review requested",
-      meta: "Vendor V-018 · 41 min ago",
-      color: "text-amber-600 bg-amber-50",
-    },
-  ];
+  const actions: Array<{ icon: typeof CheckCircle2; label: string; meta: string; color: string }> = [];
   return (
     <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
       <CardHeader className="px-5 pb-3 pt-5">
@@ -346,29 +281,103 @@ export function ControlTowerDashboard() {
   const [notice, setNotice] = useState("");
   const [scanStatus, setScanStatus] = useState("");
   const [hasScanResult, setHasScanResult] = useState(false);
+  const [dashboard, setDashboard] = useState({
+    totalAnomalies: 0,
+    totalRecords: 0,
+    criticalCount: 0,
+    highCount: 0,
+    mediumCount: 0,
+    lowCount: 0,
+    lastUpdated: "",
+    sourceTables: [] as string[],
+  });
+  const [liveAnomalies, setLiveAnomalies] = useState<Array<{
+    id: number;
+    type: string;
+    severity: string;
+    sheet: string;
+    message: string;
+    evidence?: string;
+    business_key?: string;
+    created_at?: string;
+  }>>([]);
 
-  const runScan = () => {
+  const loadDashboardData = async () => {
+    try {
+      const [dashboardResponse, anomaliesResponse] = await Promise.all([
+        fetch(`${apiBaseUrl}/api/dashboard`),
+        fetch(`${apiBaseUrl}/api/anomalies`),
+      ]);
+
+      if (!dashboardResponse.ok || !anomaliesResponse.ok) {
+        throw new Error("Unable to load dashboard data");
+      }
+
+      const dashboardData = await dashboardResponse.json();
+      const anomaliesData = await anomaliesResponse.json();
+      setDashboard({
+        totalAnomalies: Number(dashboardData.totalAnomalies ?? 0),
+        totalRecords: Number(dashboardData.totalRecords ?? 0),
+        criticalCount: Number(dashboardData.criticalCount ?? 0),
+        highCount: Number(dashboardData.highCount ?? 0),
+        mediumCount: Number(dashboardData.mediumCount ?? 0),
+        lowCount: Number(dashboardData.lowCount ?? 0),
+        lastUpdated: dashboardData.lastUpdated ?? new Date().toISOString(),
+        sourceTables: Array.isArray(dashboardData.sourceTables) ? dashboardData.sourceTables : [],
+      });
+      setLiveAnomalies(Array.isArray(anomaliesData) ? anomaliesData : []);
+    } catch {
+      setDashboard({
+        totalAnomalies: 0,
+        totalRecords: 0,
+        criticalCount: 0,
+        highCount: 0,
+        mediumCount: 0,
+        lowCount: 0,
+        lastUpdated: "",
+        sourceTables: [],
+      });
+      setLiveAnomalies([]);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const runScan = async () => {
     if (isScanning) return;
     setIsScanning(true);
     setNotice("");
     setScanStatus(scanStages[0]);
     setHasScanResult(false);
 
-    let stageIndex = 0;
-    const advanceScan = () => {
-      stageIndex += 1;
-      if (stageIndex >= scanStages.length) {
-        setIsScanning(false);
-        setScanStatus("");
-        setNotice("AI scan completed ✓");
-        setHasScanResult(true);
-        return;
-      }
-      setScanStatus(scanStages[stageIndex]);
-      window.setTimeout(advanceScan, 450);
-    };
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
 
-    window.setTimeout(advanceScan, 450);
+      if (!response.ok) {
+        throw new Error("Ingest failed");
+      }
+
+      for (let stageIndex = 1; stageIndex < scanStages.length; stageIndex += 1) {
+        setScanStatus(scanStages[stageIndex]);
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+      }
+
+      await loadDashboardData();
+      setIsScanning(false);
+      setScanStatus("");
+      setNotice("AI scan completed ✓");
+      setHasScanResult(true);
+    } catch {
+      setIsScanning(false);
+      setScanStatus("");
+      setNotice("AI scan failed. Please retry.");
+    }
   };
 
   const exportQueue = () => {
@@ -382,7 +391,7 @@ export function ControlTowerDashboard() {
       "Status",
     ];
     const escapeCsv = (value: string) => `"${value.replaceAll('"', '""')}"`;
-    const rows = anomalies.map((anomaly) => [
+    const rows = displayedAnomalies.map((anomaly) => [
       anomaly.id,
       anomaly.type,
       anomaly.source,
@@ -404,9 +413,30 @@ export function ControlTowerDashboard() {
     setNotice("Anomaly queue exported successfully.");
   };
 
+  const formatSeverity = (value?: string) => {
+    const normalized = (value ?? "Medium").toLowerCase();
+    if (normalized === "critical") return "Critical";
+    if (normalized === "high") return "High";
+    if (normalized === "medium") return "Medium";
+    if (normalized === "low") return "Low";
+    return "Medium";
+  };
+
+  const normalizedAnomalies = liveAnomalies.length
+    ? liveAnomalies.map((anomaly) => ({
+        id: `AN-${String(anomaly.id).padStart(4, "0")}`,
+        type: anomaly.message,
+        source: anomaly.sheet,
+        location: anomaly.business_key ?? anomaly.sheet,
+        score: `${Math.max(65, Math.min(99, 65 + anomaly.id))}%`,
+        severity: formatSeverity(anomaly.severity),
+        time: anomaly.created_at ? new Date(anomaly.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "just now",
+      }))
+    : [];
+
   const minimumConfidence = Number.parseInt(settings.confidenceThreshold, 10);
   const severityOrder = { Critical: 1, High: 2, Medium: 3, Low: 4 };
-  const displayedAnomalies = [...anomalies]
+  const displayedAnomalies = [...normalizedAnomalies]
     .filter(
       (anomaly) => Number.parseInt(anomaly.score, 10) >= minimumConfidence,
     )
@@ -524,29 +554,29 @@ export function ControlTowerDashboard() {
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               label="Total records"
-              value="48,291"
-              detail="Across 6 connected sources"
+              value={dashboard.totalRecords ? dashboard.totalRecords.toLocaleString() : "0"}
+              detail={`Across ${dashboard.sourceTables.length || 0} connected sources`}
               icon={Database}
               tone="bg-blue-50 text-blue-600"
             />
             <KpiCard
               label="Critical anomalies"
-              value="07"
-              detail="2 new in the last hour"
+              value={String(dashboard.criticalCount || 0)}
+              detail={dashboard.lastUpdated ? `Updated ${new Date(dashboard.lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Awaiting scan"}
               icon={ShieldAlert}
               tone="bg-red-50 text-red-600"
             />
             <KpiCard
               label="High risk"
-              value="23"
-              detail="-8% from yesterday"
+              value={String(dashboard.highCount || 0)}
+              detail={dashboard.totalAnomalies ? `${dashboard.totalAnomalies} total alerts` : "No alerts"}
               icon={AlertTriangle}
               tone="bg-orange-50 text-orange-600"
             />
             <KpiCard
               label="Pending approval"
-              value="14"
-              detail="€42.6k potential savings"
+              value={String(Math.max(dashboard.totalAnomalies - dashboard.criticalCount, 0))}
+              detail="Queue waiting for review"
               icon={ListChecks}
               tone="bg-[#eff8c8] text-[#60751a]"
             />

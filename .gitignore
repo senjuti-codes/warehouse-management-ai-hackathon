@@ -1,21 +1,7 @@
-# env files with real secrets — templates (*.example) stay tracked
-.env
-.env.local
+node_modules/
+.next/
+backend/warehouse_ai.sqlite
+backend/*.sqlite
 backend/.env
+!backend/.env.example
 frontend/.env.local
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-
-# Node
-frontend/node_modules/
-frontend/.next/
-
-# OS
-.DS_Store
-
-# dataset workbook dropped locally for docker-compose's volume mount
-data/*.xlsx

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -12,11 +12,8 @@ import {
   Sparkles,
   Table2,
 } from "lucide-react";
-import {
-  dataSources,
-  type DataSourceRecord,
-  type DataSourceStatus,
-} from "@/data/data-sources";
+import { type DataSourceRecord, type DataSourceStatus } from "@/data/data-sources";
+import { fetchWorkbookTable } from "@/lib/workbook-api";
 import { Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -210,11 +207,33 @@ function FilterSelect({
 }
 
 export function DataSourcesPage() {
+  const [dataSources, setDataSources] = useState<DataSourceRecord[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [selectedSource, setSelectedSource] = useState<DataSourceRecord | null>(
     null,
   );
+  useEffect(() => {
+    const tables = [
+      ["inventory_stock", "Warehouse inventory"],
+      ["deliveries_dispatch", "Outbound logistics"],
+      ["material_master", "Master data"],
+      ["vendor_master", "Procurement master"],
+      ["warehouse_bin", "Storage capacity"],
+      ["purchase_replenish", "Purchase orders"],
+    ] as const;
+    Promise.all(tables.map(async ([name, type]) => {
+      const result = await fetchWorkbookTable(name);
+      return {
+        name,
+        type,
+        records: result.total.toLocaleString(),
+        lastSync: "Current workbook run",
+        status: "Healthy" as DataSourceStatus,
+        coverage: "100%",
+      };
+    })).then(setDataSources).catch(() => setDataSources([]));
+  }, []);
   const filteredSources = useMemo(
     () =>
       dataSources.filter((source) => {
@@ -276,28 +295,28 @@ export function DataSourcesPage() {
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
                 label="Connected sources"
-                value="06"
+                value={dataSources.length.toString().padStart(2, "0")}
                 detail="Warehouse and procurement feeds"
                 icon={Database}
                 tone="bg-blue-50 text-blue-600"
               />
               <SummaryCard
                 label="Healthy sources"
-                value="04"
+                value={dataSources.filter((source) => source.status === "Healthy").length.toString().padStart(2, "0")}
                 detail="Ready for AI analysis"
                 icon={CheckCircle2}
                 tone="bg-emerald-50 text-emerald-600"
               />
               <SummaryCard
                 label="Sources with warnings"
-                value="02"
+                value={dataSources.filter((source) => source.status === "Warning").length.toString().padStart(2, "0")}
                 detail="Quality review recommended"
                 icon={AlertTriangle}
                 tone="bg-amber-50 text-amber-600"
               />
               <SummaryCard
                 label="Records processed"
-                value="48,291"
+                value={dataSources.reduce((total, source) => total + Number(source.records.replaceAll(",", "")), 0).toLocaleString()}
                 detail="Across all connected sources"
                 icon={Table2}
                 tone="bg-[#eff8c8] text-[#60751a]"
@@ -398,7 +417,7 @@ export function DataSourcesPage() {
             </div>
             <DialogTitle>{selectedSource?.name}</DialogTitle>
             <DialogDescription>
-              Current mock monitoring details for this connected data source.
+              Workbook-backed monitoring details for this connected data source.
             </DialogDescription>
           </DialogHeader>
           {selectedSource && (

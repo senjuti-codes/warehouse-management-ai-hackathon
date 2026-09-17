@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -13,12 +13,8 @@ import {
   Sparkles,
   Warehouse,
 } from "lucide-react";
-import {
-  materialRisks,
-  warehouseHealth,
-  type InventoryRisk,
-  type MaterialRisk,
-} from "@/data/inventory-health";
+import { type InventoryRisk, type MaterialRisk, type WarehouseHealth } from "@/data/inventory-health";
+import { fetchWorkbookTable } from "@/lib/workbook-api";
 import { Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,7 +84,7 @@ function SummaryCard({
 
 function WarehouseHealthCard({
   warehouse,
-}: Readonly<{ warehouse: (typeof warehouseHealth)[number] }>) {
+}: Readonly<{ warehouse: WarehouseHealth }>) {
   return (
     <div className="rounded-lg border border-slate-200 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -195,12 +191,12 @@ function MaterialRiskTable({ records }: Readonly<{ records: MaterialRisk[] }>) {
                   <RiskBadge risk={record.risk} />
                 </TableCell>
                 <TableCell className="text-right">
-                  {record.material === "M-8821" ? (
+                  {record.risk !== "Low" ? (
                     <Link
-                      href="/anomalies/AN-2016"
+                      href="/anomalies"
                       className="inline-flex items-center gap-1 text-xs font-medium text-red-700 underline-offset-4 hover:underline"
                     >
-                      Investigate <ArrowUpRight className="size-3.5" />
+                      Review <ArrowUpRight className="size-3.5" />
                     </Link>
                   ) : (
                     <span className="text-xs text-slate-300">Monitor</span>
@@ -216,7 +212,27 @@ function MaterialRiskTable({ records }: Readonly<{ records: MaterialRisk[] }>) {
 }
 
 export function InventoryHealthPage() {
+  const [materialRisks, setMaterialRisks] = useState<MaterialRisk[]>([]);
+  const [warehouseHealth, setWarehouseHealth] = useState<WarehouseHealth[]>([]);
   const [search, setSearch] = useState("");
+  useEffect(() => {
+    Promise.all([fetchWorkbookTable("material_master"), fetchWorkbookTable("inventory_stock"), fetchWorkbookTable("warehouse_bin")]).then(([materials, inventory, bins]) => {
+      const materialMap = new Map(materials.rows.map((row) => [String(row.material ?? ""), row]));
+      setMaterialRisks(inventory.rows.map((row) => {
+        const material = String(row.material ?? "");
+        const master = materialMap.get(material);
+        const available = Number(row.qty_on_hand ?? 0);
+        const required = Number(master?.reorder_point ?? 0);
+        const shortfall = available - required;
+        const risk: InventoryRisk = shortfall < 0 && available === 0 ? "Critical" : shortfall < 0 ? "High" : "Low";
+        return { material, name: String(master?.description ?? "Unknown material"), warehouse: String(row.plant ?? "Unknown plant"), available, required, shortfall, risk };
+      }));
+      const plantRows = new Map<string, { occupied: number; capacity: number; stock: number; reorder: number }>();
+      for (const row of bins.rows) { const plant = String(row.plant ?? "Unknown"); const current = plantRows.get(plant) ?? { occupied: 0, capacity: 0, stock: 0, reorder: 0 }; current.occupied += Number(row.occupied ?? 0); current.capacity += Number(row.capacity ?? 0); plantRows.set(plant, current); }
+      for (const row of inventory.rows) { const plant = String(row.plant ?? "Unknown"); const current = plantRows.get(plant) ?? { occupied: 0, capacity: 0, stock: 0, reorder: 0 }; current.stock += Number(row.qty_on_hand ?? 0); const master = materialMap.get(String(row.material ?? "")); current.reorder += Number(master?.reorder_point ?? 0); plantRows.set(plant, current); }
+      setWarehouseHealth([...plantRows.entries()].map(([id, value]) => { const capacity = value.capacity ? Math.round(value.occupied / value.capacity * 100) : 0; const stockHealth = value.reorder ? Math.min(100, Math.round(value.stock / value.reorder * 100)) : 0; return { id, city: "Workbook plant", stockHealth, capacity, status: capacity > 90 || stockHealth < 80 ? "At risk" : "Healthy" }; }));
+    }).catch(() => { setMaterialRisks([]); setWarehouseHealth([]); });
+  }, []);
   const filteredMaterials = useMemo(
     () =>
       materialRisks.filter((record) =>
@@ -272,28 +288,28 @@ export function InventoryHealthPage() {
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
               label="Total inventory"
-              value="48,291 EA"
-              detail="Across 6 warehouses"
+              value={`${materialRisks.reduce((total, record) => total + record.available, 0).toLocaleString()} EA`}
+              detail={`Across ${warehouseHealth.length} workbook plants`}
               icon={Boxes}
               tone="bg-blue-50 text-blue-600"
             />
             <SummaryCard
               label="Healthy stock"
-              value="41,820 EA"
-              detail="87% of inventory"
+              value={`${materialRisks.filter((record) => record.risk === "Low").length}`}
+              detail="Materials above reorder point"
               icon={CheckCircle2}
               tone="bg-emerald-50 text-emerald-600"
             />
             <SummaryCard
               label="At-risk stock"
-              value="4,320 EA"
+              value={`${materialRisks.filter((record) => record.risk !== "Low").length}`}
               detail="Requires attention"
               icon={AlertTriangle}
               tone="bg-amber-50 text-amber-600"
             />
             <SummaryCard
               label="Stockout risks"
-              value="07"
+              value={String(materialRisks.filter((record) => record.risk === "Critical").length).padStart(2, "0")}
               detail="Critical materials"
               icon={PackageCheck}
               tone="bg-red-50 text-red-600"
@@ -405,20 +421,17 @@ export function InventoryHealthPage() {
                 </CardHeader>
                 <CardContent className="p-5">
                   <p className="text-lg font-semibold">
-                    7 materials require immediate attention.
+                    {materialRisks.filter((record) => record.risk !== "Low").length} materials require attention.
                   </p>
                   <div className="mt-5 space-y-4 text-sm leading-6 text-white/65">
                     <p className="border-l-2 border-red-400 pl-3">
-                      M-8821 at WH-03 has a 60 EA shortage against today&apos;s
-                      dispatch requirement.
+                      {materialRisks.filter((record) => record.shortfall < 0).length} materials are below their workbook reorder point.
                     </p>
                     <p className="border-l-2 border-amber-300 pl-3">
-                      WH-03 is operating at 93% capacity and has the highest
-                      inventory pressure.
+                      {warehouseHealth.filter((warehouse) => warehouse.status === "At risk").length} workbook plants are above the configured capacity or stock threshold.
                     </p>
                     <p className="border-l-2 border-orange-300 pl-3">
-                      4 materials have shortages that may affect upcoming
-                      deliveries.
+                      Shortfalls are calculated from quantity on hand versus reorder point.
                     </p>
                   </div>
                   <Link
@@ -446,12 +459,12 @@ export function InventoryHealthPage() {
                         Critical
                       </Badge>
                       <span className="font-mono text-xs text-red-700">
-                        M-8821 · WH-03
+                        {materialRisks[0]?.material ?? "No critical material"} · {materialRisks[0]?.warehouse ?? "Awaiting data"}
                       </span>
                     </div>
-                    <p className="mt-2 text-sm font-medium">Replenish 60 EA</p>
+                    <p className="mt-2 text-sm font-medium">Review the current shortfall</p>
                     <p className="mt-1 text-xs leading-5 text-slate-500">
-                      Today&apos;s dispatch requirement exceeds available stock.
+                      Workbook quantity on hand is below the configured reorder point.
                     </p>
                   </div>
                   <div className="rounded-lg border border-orange-100 bg-orange-50/50 p-3">
