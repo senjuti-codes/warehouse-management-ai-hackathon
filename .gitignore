@@ -3,4 +3,5 @@ node_modules/
 backend/warehouse_ai.sqlite
 backend/*.sqlite
 backend/.env
+!backend/.env.example
 frontend/.env.local
