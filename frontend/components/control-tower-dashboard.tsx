@@ -727,6 +727,9 @@ export function ControlTowerDashboard() {
     lowCount: 0,
     lastUpdated: "",
     sourceTables: [] as string[],
+    autoFixedCount: 0,
+    awaitingApprovalCount: 0,
+    notTriagedCount: 0,
   });
   const [liveAnomalies, setLiveAnomalies] = useState<Array<{
     id: number;
@@ -740,6 +743,8 @@ export function ControlTowerDashboard() {
   }>>([]);
   const [impact, setImpact] = useState({ atRiskValueEuros: 0, potentialDelayHours: 0, recoveryCoveragePercent: 0 });
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [isCascadeRunning, setIsCascadeRunning] = useState(false);
+  const [cascadeNotice, setCascadeNotice] = useState("");
 
   const loadDashboardData = async () => {
     try {
@@ -765,6 +770,9 @@ export function ControlTowerDashboard() {
         lowCount: Number(dashboardData.lowCount ?? 0),
         lastUpdated: dashboardData.lastUpdated ?? new Date().toISOString(),
         sourceTables: Array.isArray(dashboardData.sourceTables) ? dashboardData.sourceTables : [],
+        autoFixedCount: Number(dashboardData.autoFixedCount ?? 0),
+        awaitingApprovalCount: Number(dashboardData.awaitingApprovalCount ?? 0),
+        notTriagedCount: Number(dashboardData.notTriagedCount ?? 0),
       });
       setLiveAnomalies(Array.isArray(anomaliesData) ? anomaliesData : []);
       if (impactResponse.ok) {
@@ -789,6 +797,9 @@ export function ControlTowerDashboard() {
         lowCount: 0,
         lastUpdated: "",
         sourceTables: [],
+        autoFixedCount: 0,
+        awaitingApprovalCount: 0,
+        notTriagedCount: 0,
       });
       setLiveAnomalies([]);
       setImpact({ atRiskValueEuros: 0, potentialDelayHours: 0, recoveryCoveragePercent: 0 });
@@ -803,6 +814,25 @@ export function ControlTowerDashboard() {
 
     return () => window.clearTimeout(loadTimer);
   }, []);
+
+  const runAiCascade = async () => {
+    if (isCascadeRunning) return;
+    setIsCascadeRunning(true);
+    setCascadeNotice("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/ai-cascade/run`, { method: "POST" });
+      if (!response.ok) throw new Error("Cascade failed");
+      const summary = await response.json();
+      await loadDashboardData();
+      setCascadeNotice(
+        `AI cascade complete: ${summary.autoFixed} auto-fixed, ${summary.pendingReview} routed to Approvals with AI-generated solutions.`,
+      );
+    } catch {
+      setCascadeNotice("AI cascade failed. Please retry once the workbook has been scanned.");
+    } finally {
+      setIsCascadeRunning(false);
+    }
+  };
 
   const runScan = async () => {
     if (isScanning) return;
@@ -982,23 +1012,45 @@ export function ControlTowerDashboard() {
               )}
             </div>
             <div className="flex flex-col items-start gap-2 sm:items-end">
-              <Button
-                disabled={isScanning}
-                onClick={runScan}
-                className="w-fit bg-[#0B4F4A] text-white hover:bg-[#093D38]"
-              >
-                {isScanning ? (
-                  <RefreshCw className="animate-spin" />
-                ) : (
-                  <Sparkles />
-                )}{" "}
-                {isScanning ? "Scanning..." : "Run AI scan"}{" "}
-                {!isScanning && <ArrowUpRight />}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  disabled={isScanning}
+                  onClick={runScan}
+                  className="w-fit bg-[#0B4F4A] text-white hover:bg-[#093D38]"
+                >
+                  {isScanning ? (
+                    <RefreshCw className="animate-spin" />
+                  ) : (
+                    <Sparkles />
+                  )}{" "}
+                  {isScanning ? "Scanning..." : "Run AI scan"}{" "}
+                  {!isScanning && <ArrowUpRight />}
+                </Button>
+                <Button
+                  disabled={isCascadeRunning || dashboard.totalAnomalies === 0}
+                  onClick={runAiCascade}
+                  variant="outline"
+                  className="w-fit border-[#0B4F4A]/30 text-[#0B4F4A] hover:bg-[#0B4F4A]/10"
+                >
+                  {isCascadeRunning ? <RefreshCw className="animate-spin" /> : <Zap />}{" "}
+                  {isCascadeRunning ? "Triaging with AI..." : "Run AI cascade"}
+                </Button>
+              </div>
               {notice && (
                 <output className="text-xs font-medium text-emerald-700">
                   {notice}
                 </output>
+              )}
+              {cascadeNotice && (
+                <output className="max-w-xs text-right text-xs font-medium text-[#0B4F4A]">
+                  {cascadeNotice}
+                </output>
+              )}
+              {isCascadeRunning && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <span className="size-1.5 animate-pulse rounded-full bg-[#0B4F4A]" />
+                  Triage → auto-fix → solution generation across every un-triaged anomaly
+                </div>
               )}
               {isScanning && (
                 <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -1024,7 +1076,7 @@ export function ControlTowerDashboard() {
               )}
             </div>
           </section>
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <KpiCard
               label="Total records"
               value={dashboard.totalRecords ? dashboard.totalRecords.toLocaleString() : "0"}
@@ -1047,8 +1099,15 @@ export function ControlTowerDashboard() {
               tone="bg-orange-50 text-orange-600"
             />
             <KpiCard
+              label="AI auto-fixed"
+              value={String(dashboard.autoFixedCount || 0)}
+              detail="Zero human effort"
+              icon={Zap}
+              tone="bg-[#0B4F4A]/10 text-[#0B4F4A]"
+            />
+            <KpiCard
               label="Pending approval"
-              value={String(Math.max(dashboard.totalAnomalies - dashboard.criticalCount, 0))}
+              value={String(dashboard.awaitingApprovalCount || 0)}
               detail="Queue waiting for review"
               icon={ListChecks}
               tone="bg-[#eff8c8] text-[#60751a]"

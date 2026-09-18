@@ -2,6 +2,13 @@ import { DatabaseSync } from 'node:sqlite';
 
 export const db = new DatabaseSync('warehouse_ai.sqlite');
 
+const ensureColumn = (table: string, column: string, definition: string) => {
+  const columns = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
+  if (!columns.some((entry) => entry.name === column)) {
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN ${column} ${definition};`);
+  }
+};
+
 export const initializeDatabase = () => {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(`
@@ -38,6 +45,9 @@ export const initializeDatabase = () => {
     );
   `);
 
+  // decided_by distinguishes a human operator decision from an autonomous AI auto-fix
+  ensureColumn('anomaly_decisions', 'decided_by', "TEXT NOT NULL DEFAULT 'operator'");
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +58,38 @@ export const initializeDatabase = () => {
       summary TEXT NOT NULL,
       payload TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Stage 3 (LLMaaS Triage): per-anomaly auto-fix eligibility + risk assessment
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS anomaly_triage (
+      anomaly_id INTEGER PRIMARY KEY,
+      auto_fixable INTEGER NOT NULL DEFAULT 0,
+      auto_fix_confidence REAL,
+      risk_level TEXT,
+      reasoning TEXT,
+      recommended_action TEXT,
+      approval_urgency TEXT,
+      model TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (anomaly_id) REFERENCES anomalies(id) ON DELETE CASCADE
+    );
+  `);
+
+  // Stage 4 (LLMaaS Solution Generator): rich recommendation for anomalies needing manual review
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS anomaly_solutions (
+      anomaly_id INTEGER PRIMARY KEY,
+      executive_summary TEXT,
+      root_cause_analysis TEXT,
+      business_impact TEXT,
+      solutions TEXT,
+      recommended_option INTEGER,
+      approval_checklist TEXT,
+      model TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (anomaly_id) REFERENCES anomalies(id) ON DELETE CASCADE
     );
   `);
 };
