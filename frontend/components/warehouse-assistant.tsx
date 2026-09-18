@@ -160,6 +160,7 @@ export function WarehouseAssistant() {
   const [rowId, setRowId] = useState("")
   const [search, setSearch] = useState("")
   const [jsonValue, setJsonValue] = useState("{}")
+  const [addValues, setAddValues] = useState<Record<string, string>>({})
   const [tables, setTables] = useState<string[]>(fallbackTables)
   const [columns, setColumns] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -219,7 +220,9 @@ export function WarehouseAssistant() {
         payload.updates = parseJsonObject(jsonValue)
       }
       if (mode === "add") {
-        payload.values = parseJsonObject(jsonValue)
+        payload.values = Object.fromEntries(
+          Object.entries(addValues).filter(([, value]) => value.trim() !== ""),
+        )
       }
 
       const data = await callAssistant(payload)
@@ -227,11 +230,14 @@ export function WarehouseAssistant() {
         ...current,
         {
           role: "assistant",
-          content: data.reply ?? "Done.",
+          content: mode === "add" && data.row
+            ? `${data.reply ?? "Added row."} You can see the new ${data.table ?? table} row below with Row ID ${String(data.row.id ?? "")}.`
+            : data.reply ?? "Done.",
           table: data.table ?? table,
           rows: data.rows ?? (data.row ? [data.row] : []),
         },
       ])
+      if (mode === "add") setAddValues({})
     } catch (error) {
       setMessages((current) => [...current, { role: "assistant", content: error instanceof Error ? error.message : "Assistant failed." }])
     }
@@ -242,6 +248,11 @@ export function WarehouseAssistant() {
 
     try {
       const data = await callAssistant({ action: "view", table, search, limit: 12 })
+      if (mode === "add" && data.columns?.length) {
+        setAddValues((current) => ({
+          ...Object.fromEntries(data.columns?.map((column) => [column, current[column] ?? ""]) ?? []),
+        }))
+      }
       setMessages((current) => [
         ...current,
         {
@@ -270,6 +281,18 @@ export function WarehouseAssistant() {
     ])
   }
 
+  const openAssistant = () => {
+    setMode("ask")
+    setIsExpanded(false)
+    setIsOpen(true)
+  }
+
+  const closeAssistant = () => {
+    setIsOpen(false)
+    setMode("ask")
+    setIsExpanded(false)
+  }
+
   const ActiveIcon = modeConfig[mode].icon
   const panelClassName = isExpanded
     ? "fixed inset-3 z-40 flex flex-col overflow-hidden rounded-2xl border border-white/70 bg-[#f8faf7] shadow-[0_28px_80px_rgba(23,33,31,0.22)] ring-1 ring-slate-900/5 xl:inset-y-5 xl:left-auto xl:right-5 xl:w-[min(1040px,calc(100vw-2.5rem))]"
@@ -282,7 +305,7 @@ export function WarehouseAssistant() {
     : "min-h-[220px] flex-1 space-y-3 overflow-y-auto p-4"
   const formClassName = isExpanded && mode !== "ask"
     ? "shrink-0 overflow-y-auto border-t border-slate-200 bg-white p-5 lg:border-l lg:border-t-0"
-    : "shrink-0 border-t border-slate-200 bg-white p-4"
+    : "max-h-[48vh] shrink-0 overflow-y-auto border-t border-slate-200 bg-white p-4"
 
   return (
     <>
@@ -291,7 +314,7 @@ export function WarehouseAssistant() {
           type="button"
           size="lg"
           aria-label="Open LogiMind assistant"
-          onClick={() => setIsOpen(true)}
+          onClick={openAssistant}
           className="fixed bottom-5 right-5 z-40 h-14 rounded-full bg-[#0B4F4A] px-4 text-white shadow-[0_18px_42px_rgba(11,79,74,0.38)] ring-4 ring-[#d8f36b]/25 hover:bg-[#093D38]"
         >
           <span className="relative grid size-8 place-items-center rounded-full bg-[#d8f36b] text-[#17211f]">
@@ -317,7 +340,7 @@ export function WarehouseAssistant() {
                   {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   <span className="sr-only">{isExpanded ? "Collapse assistant" : "Expand assistant"}</span>
                 </Button>
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setIsOpen(false)} className="text-white hover:bg-white/10 hover:text-white">
+                <Button type="button" variant="ghost" size="icon-sm" onClick={closeAssistant} className="text-white hover:bg-white/10 hover:text-white">
                   <X className="size-4" />
                 </Button>
               </div>
@@ -388,7 +411,7 @@ export function WarehouseAssistant() {
             ) : (
               <div className="space-y-3">
                 <div className="grid gap-2 md:grid-cols-2">
-                  <Select value={table} onValueChange={(nextValue) => { setTable(nextValue ?? "inventory_stock"); setColumns([]); setRowId(""); setJsonValue("{}") }}>
+                  <Select value={table} onValueChange={(nextValue) => { setTable(nextValue ?? "inventory_stock"); setColumns([]); setRowId(""); setJsonValue("{}"); setAddValues({}) }}>
                     <SelectTrigger aria-label="Assistant table" className="w-full border-slate-200 bg-white">
                       <span data-slot="select-value" className="flex flex-1 text-left">{table}</span>
                     </SelectTrigger>
@@ -406,7 +429,7 @@ export function WarehouseAssistant() {
                 )}
                 {mode === "add" && (
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-                    New data will be added to <strong>{table}</strong>. After saving, the exact inserted row and row id will appear in the chat.
+                    New data will be added to <strong>{table}</strong>. Fill only the fields you know. After saving, the exact inserted row and row id will appear in the chat.
                   </div>
                 )}
                 {(mode === "edit" || mode === "add") && (
@@ -419,18 +442,44 @@ export function WarehouseAssistant() {
                     Editing <strong>{table}</strong> row <strong>{rowId}</strong>
                   </div>
                 )}
-                {(mode === "edit" || mode === "add") && (
+                {mode === "edit" && (
                   <div>
                     <Textarea value={jsonValue} onChange={(event) => setJsonValue(event.target.value)} className="min-h-28 max-h-48 border-slate-200 font-mono text-xs" placeholder='{"status":"READY"}' />
                     <p className="mt-1 text-[11px] text-slate-400">
-                      {mode === "add" ? `Adds a new row to the selected backend table: ${table}. The inserted row appears in chat after saving.` : "Updates the selected backend table row by id."}
+                      Updates the selected backend table row by id.
                     </p>
                     <p className="mt-1 text-[11px] text-slate-400">
                       {columns.length ? `Editable columns: ${columns.slice(0, 6).join(", ")}${columns.length > 6 ? "..." : ""}` : "Use a JSON object with workbook column names."}
                     </p>
                   </div>
                 )}
-                <Button onClick={submitDataAction} disabled={isLoading || (mode === "edit" && !rowId.trim())} className="w-full bg-[#0B4F4A] text-white hover:bg-[#093D38]">
+                {mode === "add" && (
+                  <div className="space-y-3">
+                    {columns.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                        Click <strong>Show columns / recent rows</strong> to load the fields for {table}.
+                      </div>
+                    ) : (
+                      <div className="grid max-h-52 gap-3 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:max-h-72">
+                        {columns.map((column) => (
+                          <label key={column} className="text-xs font-medium text-slate-600">
+                            <span className="mb-1 block capitalize">{column.replaceAll("_", " ")}</span>
+                            <Input
+                              value={addValues[column] ?? ""}
+                              onChange={(event) => setAddValues((current) => ({ ...current, [column]: event.target.value }))}
+                              placeholder={column}
+                              className="h-8 border-slate-200 bg-white"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-[11px] text-slate-400">
+                      Adds to backend table <strong>{table}</strong>. This does not rewrite the original Excel file.
+                    </p>
+                  </div>
+                )}
+                <Button onClick={submitDataAction} disabled={isLoading || (mode === "edit" && !rowId.trim()) || (mode === "add" && Object.values(addValues).every((value) => !value.trim()))} className="w-full bg-[#0B4F4A] text-white hover:bg-[#093D38]">
                   {isLoading ? <Loader2 className="size-4 animate-spin" /> : <ActiveIcon className="size-4" />}
                   {modeConfig[mode].label} data
                 </Button>
