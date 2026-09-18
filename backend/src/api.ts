@@ -3,7 +3,7 @@ import { db, initializeDatabase, logAudit } from './db.ts';
 import { appConfig } from './config.ts';
 import { ingestWorkbook } from './services/ingestionService.ts';
 import { runDetection } from './services/ruleEngine.ts';
-import { analyzeAnomalyWithLlm } from './services/llmService.ts';
+import { analyzeAnomalyWithLlm, answerAssistantQuestionWithLlm } from './services/llmService.ts';
 
 const parseBody = async (req: import('node:http').IncomingMessage) => {
   const chunks: Buffer[] = [];
@@ -39,6 +39,100 @@ const recommendationFor = (type: string) => {
   };
 
   return recommendations[type] ?? { category: 'Operations', recommendation: 'Review the linked source records and confirm the corrective action.', confidence: 0.75 };
+};
+
+const assistantExcludedTables = new Set(['workbook_runs', 'anomalies', 'anomaly_decisions', 'audit_log', 'readme', 'data_dictionary']);
+
+const quoteIdentifier = (identifier: string) => `"${identifier.replaceAll('"', '""')}"`;
+
+const getWorkbookTableNames = () => {
+  const rows = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+  ).all() as Array<{ name: string }>;
+
+  return rows
+    .map((row) => row.name)
+    .filter((name) => /^[a-z0-9_]+$/.test(name) && !assistantExcludedTables.has(name));
+};
+
+const assertAssistantTable = (tableName: string) => {
+  if (!/^[a-z0-9_]+$/.test(tableName) || !getWorkbookTableNames().includes(tableName)) {
+    throw new Error('Choose a valid workbook table before viewing or editing data.');
+  }
+};
+
+const getTableColumns = (tableName: string) => {
+  assertAssistantTable(tableName);
+  const columns = db.prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`).all() as Array<{ name: string }>;
+  return columns.map((column) => column.name);
+};
+
+const getEditableColumns = (tableName: string) =>
+  getTableColumns(tableName).filter((column) => !['id', 'row_number', 'created_at'].includes(column));
+
+const buildAssistantAnswer = (message: string) => {
+  const text = message.toLowerCase();
+  const dashboard = db.prepare('SELECT COUNT(*) AS count FROM anomalies').get() as { count: number };
+  const severityRows = db.prepare('SELECT severity, COUNT(*) AS count FROM anomalies GROUP BY severity').all() as Array<{ severity: string; count: number }>;
+  const severitySummary = Object.fromEntries(severityRows.map((row) => [row.severity, Number(row.count)])) as Record<string, number>;
+  const sourceTables = getWorkbookTableNames();
+  const cards = [
+    { label: 'Anomalies', value: dashboard.count },
+    { label: 'Critical', value: severitySummary.critical ?? 0 },
+    { label: 'High', value: severitySummary.high ?? 0 },
+    { label: 'Sources', value: sourceTables.length },
+  ];
+
+  const materialId = message.match(/MAT-\d+/i)?.[0]?.toUpperCase();
+  if (materialId) {
+    const rows = db.prepare('SELECT * FROM inventory_stock WHERE material = ? LIMIT 8').all(materialId) as Array<Record<string, unknown>>;
+    return {
+      reply: rows.length
+        ? `Found ${rows.length} inventory records for ${materialId}.`
+        : `I could not find inventory rows for ${materialId}.`,
+      rows,
+      cards,
+    };
+  }
+
+  const deliveryId = message.match(/DLV-\d+/i)?.[0]?.toUpperCase();
+  if (deliveryId) {
+    const rows = db.prepare('SELECT * FROM deliveries_dispatch WHERE delivery = ? LIMIT 8').all(deliveryId) as Array<Record<string, unknown>>;
+    return {
+      reply: rows.length
+        ? `Found dispatch records for ${deliveryId}.`
+        : `I could not find delivery ${deliveryId}.`,
+      rows,
+      cards,
+    };
+  }
+
+  if (text.includes('critical') || text.includes('high') || text.includes('anomal')) {
+    const rows = db.prepare("SELECT id, type, severity, sheet, message, business_key, created_at FROM anomalies ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, id DESC LIMIT 8").all() as Array<Record<string, unknown>>;
+    return {
+      reply: `There are ${dashboard.count} anomalies: ${severitySummary.critical ?? 0} critical, ${severitySummary.high ?? 0} high, ${severitySummary.medium ?? 0} medium, and ${severitySummary.low ?? 0} low.`,
+      rows,
+      cards,
+    };
+  }
+
+  if (text.includes('dispatch') || text.includes('deliver')) {
+    const count = db.prepare('SELECT COUNT(*) AS count FROM deliveries_dispatch').get() as { count: number };
+    const rows = db.prepare('SELECT delivery, material, plant, order_qty, status, planned_gi_date FROM deliveries_dispatch ORDER BY id LIMIT 8').all() as Array<Record<string, unknown>>;
+    return { reply: `Dispatch currently has ${count.count} workbook deliveries.`, rows, cards };
+  }
+
+  if (text.includes('inventory') || text.includes('stock')) {
+    const count = db.prepare('SELECT COUNT(*) AS count FROM inventory_stock').get() as { count: number };
+    const rows = db.prepare('SELECT material, plant, qty_on_hand, blocked_qty, in_transit_qty FROM inventory_stock ORDER BY id LIMIT 8').all() as Array<Record<string, unknown>>;
+    return { reply: `Inventory currently has ${count.count} stock rows across workbook plants.`, rows, cards };
+  }
+
+  return {
+    reply: `I can help with warehouse data. Try asking about critical anomalies, inventory for MAT-100000, delivery DLV-800000, dispatch status, or use the View/Edit/Add tabs for workbook records.`,
+    rows: [] as Array<Record<string, unknown>>,
+    cards,
+  };
 };
 
 export const createApiServer = (port: number) => {
@@ -426,6 +520,154 @@ export const createApiServer = (port: number) => {
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(enriched));
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/assistant') {
+      const body = await parseBody(req) as {
+        action?: string;
+        message?: string;
+        table?: string;
+        id?: number | string;
+        values?: Record<string, unknown>;
+        updates?: Record<string, unknown>;
+        search?: string;
+        limit?: number;
+        anomalyId?: number | string;
+        status?: string;
+        comment?: string;
+      };
+      const action = String(body.action ?? 'ask');
+
+      try {
+        if (action === 'ask') {
+          const message = String(body.message ?? '');
+          const answer = buildAssistantAnswer(message);
+          let reply = answer.reply;
+          let aiMode: 'llm' | 'deterministic' = 'deterministic';
+          let model: string | null = null;
+
+          try {
+            const llmAnswer = await answerAssistantQuestionWithLlm({
+              question: message,
+              deterministicReply: answer.reply,
+              cards: answer.cards,
+              rows: answer.rows,
+              tables: getWorkbookTableNames(),
+            });
+            reply = llmAnswer.reply;
+            aiMode = 'llm';
+            model = llmAnswer.model;
+          } catch {
+            aiMode = 'deterministic';
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, action, tables: getWorkbookTableNames(), ...answer, reply, aiMode, model }));
+          return;
+        }
+
+        if (action === 'view') {
+          const table = String(body.table ?? '');
+          assertAssistantTable(table);
+          const limit = Math.min(Math.max(Number(body.limit ?? 10), 1), 50);
+          const search = String(body.search ?? '').trim();
+          const columns = getTableColumns(table);
+          const whereClause = search
+            ? ` WHERE ${columns.map((column) => `CAST(${quoteIdentifier(column)} AS TEXT) LIKE ?`).join(' OR ')}`
+            : '';
+          const searchParams = search ? columns.map(() => `%${search}%`) : [];
+          const rows = db.prepare(`SELECT * FROM ${quoteIdentifier(table)}${whereClause} ORDER BY id DESC LIMIT ?`).all(...searchParams, limit) as Array<Record<string, unknown>>;
+          const total = db.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(table)}${whereClause}`).get(...searchParams) as { count: number };
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({
+            success: true,
+            action,
+            table,
+            total: total.count,
+            rows,
+            columns: getEditableColumns(table),
+            tables: getWorkbookTableNames(),
+            reply: `Showing ${rows.length} of ${total.count} rows from ${table}.`,
+          }));
+          return;
+        }
+
+        if (action === 'update') {
+          const table = String(body.table ?? '');
+          assertAssistantTable(table);
+          const id = Number(body.id);
+          const updates = body.updates && typeof body.updates === 'object' ? body.updates : {};
+          const editableColumns = new Set(getEditableColumns(table));
+          const entries = Object.entries(updates).filter(([column]) => editableColumns.has(column));
+
+          if (!Number.isInteger(id) || entries.length === 0) {
+            throw new Error('Provide a row id and at least one editable column.');
+          }
+
+          const existingRow = db.prepare(`SELECT id FROM ${quoteIdentifier(table)} WHERE id = ?`).get(id);
+          if (!existingRow) {
+            throw new Error(`No row ${id} exists in ${table}. Use View or Find rows to pick a valid row id.`);
+          }
+
+          const assignments = entries.map(([column]) => `${quoteIdentifier(column)} = ?`).join(', ');
+          const values = entries.map(([, value]) => value === undefined || value === '' ? null : String(value));
+          db.prepare(`UPDATE ${quoteIdentifier(table)} SET ${assignments} WHERE id = ?`).run(...values, id);
+          const row = db.prepare(`SELECT * FROM ${quoteIdentifier(table)} WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+          logAudit({ eventType: 'assistant.row_updated', entityType: table, entityId: id, actor: 'assistant', summary: `Assistant updated ${table} row ${id}.`, payload: { table, id, updates: Object.fromEntries(entries) } });
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, action, table, row, columns: getEditableColumns(table), tables: getWorkbookTableNames(), reply: `Updated ${table} row ${id}.` }));
+          return;
+        }
+
+        if (action === 'insert') {
+          const table = String(body.table ?? '');
+          assertAssistantTable(table);
+          const valuesObject = body.values && typeof body.values === 'object' ? body.values : {};
+          const editableColumns = new Set(getEditableColumns(table));
+          const entries = Object.entries(valuesObject).filter(([column, value]) => editableColumns.has(column) && value !== undefined && value !== '');
+
+          if (entries.length === 0) {
+            throw new Error('Provide at least one value for an editable column.');
+          }
+
+          const columns = entries.map(([column]) => quoteIdentifier(column));
+          const placeholders = entries.map(() => '?').join(', ');
+          const params = entries.map(([, value]) => value === null ? null : String(value));
+          const result = db.prepare(`INSERT INTO ${quoteIdentifier(table)} (${columns.join(', ')}) VALUES (${placeholders})`).run(...params);
+          const row = db.prepare(`SELECT * FROM ${quoteIdentifier(table)} WHERE id = ?`).get(result.lastInsertRowid) as Record<string, unknown> | undefined;
+          logAudit({ eventType: 'assistant.row_inserted', entityType: table, entityId: String(result.lastInsertRowid), actor: 'assistant', summary: `Assistant inserted ${table} row ${String(result.lastInsertRowid)}.`, payload: { table, values: Object.fromEntries(entries) } });
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, action, table, row, columns: getEditableColumns(table), tables: getWorkbookTableNames(), reply: `Added a new row to ${table}.` }));
+          return;
+        }
+
+        if (action === 'decision') {
+          const anomalyId = Number(body.anomalyId);
+          const status = String(body.status ?? '');
+          const comment = String(body.comment ?? '').trim() || null;
+          if (!Number.isInteger(anomalyId) || !['approved', 'rejected'].includes(status)) {
+            throw new Error('Provide an anomaly id and choose approved or rejected.');
+          }
+
+          const anomaly = db.prepare('SELECT id, message FROM anomalies WHERE id = ?').get(anomalyId) as { id: number; message: string } | undefined;
+          if (!anomaly) throw new Error('Anomaly not found.');
+
+          db.prepare(
+            `INSERT INTO anomaly_decisions (anomaly_id, status, comment) VALUES (?, ?, ?)
+             ON CONFLICT(anomaly_id) DO UPDATE SET status = excluded.status, comment = excluded.comment, decided_at = CURRENT_TIMESTAMP`,
+          ).run(anomalyId, status, comment);
+          logAudit({ eventType: `anomaly.${status}`, entityType: 'anomaly', entityId: anomalyId, actor: 'assistant', summary: `Assistant ${status} anomaly AN-${anomalyId}: ${anomaly.message}`, payload: { anomalyId, status, comment } });
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, action, reply: `Anomaly AN-${anomalyId} marked ${status}.` }));
+          return;
+        }
+
+        throw new Error('Unknown assistant action.');
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, action, message: error instanceof Error ? error.message : 'Assistant request failed.' }));
+      }
       return;
     }
 

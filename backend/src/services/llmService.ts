@@ -20,6 +20,19 @@ export type LlmAnalysis = {
   model: string;
 };
 
+type AssistantQuestionContext = {
+  question: string;
+  deterministicReply: string;
+  cards: Array<{ label: string; value: string | number }>;
+  rows: Array<Record<string, unknown>>;
+  tables: string[];
+};
+
+export type AssistantLlmAnswer = {
+  reply: string;
+  model: string;
+};
+
 const extractJson = (content: string) => {
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1] ?? content;
   return JSON.parse(fenced);
@@ -92,6 +105,53 @@ export const analyzeAnomalyWithLlm = async (anomaly: AnomalyContext): Promise<Ll
       confidence: Number.isFinite(parsedConfidence) ? Math.max(0, Math.min(1, parsedConfidence)) : null,
       model: appConfig.llmModel,
     };
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const answerAssistantQuestionWithLlm = async (context: AssistantQuestionContext): Promise<AssistantLlmAnswer> => {
+  if (!appConfig.llmBaseUrl || !appConfig.llmApiKey || !appConfig.llmModel) {
+    throw new Error('LLM is not configured. Set LLMAAS_BASE_URL, LLMAAS_API_KEY, and LLMAAS_MODEL.');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), appConfig.llmTimeoutMs);
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(chatCompletionsUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'X-LLM-API-CLIENT-ID': `Bearer ${appConfig.llmApiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: appConfig.llmModel,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'You are LogiMind Assistant for warehouse operators. Use only the supplied data. Return only valid JSON with key reply. Be concise, practical, and mention when the evidence is limited. Do not invent materials, quantities, vendors, dates, or actions.',
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              task: 'Answer the operator question using the deterministic system answer and row evidence.',
+              context,
+            }),
+          },
+        ],
+      }),
+    });
+    if (!response.ok) throw new Error(`LLM request failed with HTTP ${response.status}.`);
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content;
+    if (!content) throw new Error('LLM returned an empty response.');
+    const parsed = extractJson(content) as { reply?: unknown };
+    return { reply: String(parsed.reply ?? context.deterministicReply), model: appConfig.llmModel };
   } finally {
     clearTimeout(timeout);
   }

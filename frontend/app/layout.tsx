@@ -3,6 +3,7 @@ import { Poppins } from "next/font/google";
 import "./globals.css";
 import { ApprovalProvider } from "@/components/approval-provider";
 import { SettingsProvider } from "@/components/settings-provider";
+import { WarehouseAssistant } from "@/components/warehouse-assistant";
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -24,7 +25,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <ApprovalProvider>
-          <SettingsProvider>{children}</SettingsProvider>
+          <SettingsProvider>
+            {children}
+            <WarehouseAssistant />
+          </SettingsProvider>
         </ApprovalProvider>
       </body>
     </html>
