@@ -326,6 +326,7 @@ function RecentActions({ events }: Readonly<{ events: AuditEvent[] }>) {
 
 export function ControlTowerDashboard() {
   const { settings } = useSettings();
+  const [selectedTab, setSelectedTab] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
   const [notice, setNotice] = useState("");
   const [scanStatus, setScanStatus] = useState("");
@@ -503,7 +504,7 @@ export function ControlTowerDashboard() {
 
   const minimumConfidence = Number.parseInt(settings.confidenceThreshold, 10);
   const severityOrder = { Critical: 1, High: 2, Medium: 3, Low: 4 };
-  const displayedAnomalies = [...normalizedAnomalies]
+  const sortedAnomalies = [...normalizedAnomalies]
     .filter(
       (anomaly) => Number.parseInt(anomaly.score, 10) >= minimumConfidence,
     )
@@ -513,6 +514,14 @@ export function ControlTowerDashboard() {
         : severityOrder[left.severity as keyof typeof severityOrder] -
           severityOrder[right.severity as keyof typeof severityOrder],
     );
+
+  const displayedAnomalies = sortedAnomalies.filter((anomaly) => {
+    if (selectedTab === "all") return true;
+    if (selectedTab === "critical") return anomaly.severity === "Critical";
+    if (selectedTab === "high") return anomaly.severity === "High";
+    if (selectedTab === "review") return anomaly.severity === "Medium";
+    return true;
+  });
 
   return (
     <div className="flex min-h-screen bg-[#f4f6f3] font-sans text-[#17211f]">
@@ -525,10 +534,10 @@ export function ControlTowerDashboard() {
             </Button>
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                Tuesday, September 15, 2026
+                Autonomous Logistics Engine
               </p>
               <h1 className="mt-1 text-xl font-semibold tracking-tight">
-                Good morning, Alex
+                Continuous AI Scan • 6 Connected Data Streams
               </h1>
             </div>
           </div>
@@ -669,7 +678,7 @@ export function ControlTowerDashboard() {
                 </div>
               </CardHeader>
               <CardContent className="px-5 pb-5">
-                <Tabs defaultValue="all">
+                <Tabs value={selectedTab} onValueChange={setSelectedTab} defaultValue="all">
                   <TabsList className="mb-3 w-full justify-start overflow-x-auto bg-slate-100/80 sm:w-fit">
                     <TabsTrigger value="all">
                       All{" "}
@@ -755,19 +764,136 @@ export function ControlTowerDashboard() {
                     </Table>
                   </TabsContent>
                   <TabsContent value="critical">
-                    <p className="py-12 text-center text-sm text-slate-500">
-                      Review critical anomalies from the live workbook scan.
-                    </p>
+                    {displayedAnomalies.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead>Anomaly</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead>Location</TableHead>
+                            <TableHead>Confidence</TableHead>
+                            <TableHead>Severity</TableHead>
+                            <TableHead className="text-right">Detected</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {displayedAnomalies.map((anomaly) => (
+                            <TableRow key={anomaly.id} className={settings.compactView ? "h-9" : undefined}>
+                              <TableCell>
+                                <div className="flex items-center gap-3">
+                                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100">
+                                    <AlertTriangle className="size-3.5 text-slate-500" />
+                                  </div>
+                                  <div>
+                                    <Link href={`/anomalies/${anomaly.id}`} className="font-medium text-[#17211f] underline-offset-4 hover:text-emerald-700 hover:underline">
+                                      {anomaly.type}
+                                    </Link>
+                                    <p className="text-[11px] text-slate-400">{anomaly.id}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-xs text-slate-500">{anomaly.source}</TableCell>
+                              <TableCell className="text-xs text-slate-500">{anomaly.location}</TableCell>
+                              <TableCell className="text-xs font-medium text-slate-600">{anomaly.score}</TableCell>
+                              <TableCell>
+                                <SeverityBadge severity={anomaly.severity as keyof typeof severityStyles} />
+                              </TableCell>
+                              <TableCell className="text-right text-xs text-slate-400">{anomaly.time}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <p className="py-12 text-center text-sm text-slate-500">No critical anomalies detected. System is operating normally.</p>
+                    )}
                   </TabsContent>
                   <TabsContent value="high">
-                    <p className="py-12 text-center text-sm text-slate-500">
-                      Review high-risk anomalies from the live workbook scan.
-                    </p>
+                    {displayedAnomalies.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead>Anomaly</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead>Location</TableHead>
+                            <TableHead>Confidence</TableHead>
+                            <TableHead>Severity</TableHead>
+                            <TableHead className="text-right">Detected</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {displayedAnomalies.map((anomaly) => (
+                            <TableRow key={anomaly.id} className={settings.compactView ? "h-9" : undefined}>
+                              <TableCell>
+                                <div className="flex items-center gap-3">
+                                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100">
+                                    <AlertTriangle className="size-3.5 text-slate-500" />
+                                  </div>
+                                  <div>
+                                    <Link href={`/anomalies/${anomaly.id}`} className="font-medium text-[#17211f] underline-offset-4 hover:text-emerald-700 hover:underline">
+                                      {anomaly.type}
+                                    </Link>
+                                    <p className="text-[11px] text-slate-400">{anomaly.id}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-xs text-slate-500">{anomaly.source}</TableCell>
+                              <TableCell className="text-xs text-slate-500">{anomaly.location}</TableCell>
+                              <TableCell className="text-xs font-medium text-slate-600">{anomaly.score}</TableCell>
+                              <TableCell>
+                                <SeverityBadge severity={anomaly.severity as keyof typeof severityStyles} />
+                              </TableCell>
+                              <TableCell className="text-right text-xs text-slate-400">{anomaly.time}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <p className="py-12 text-center text-sm text-slate-500">No high-risk anomalies detected. Good operational status.</p>
+                    )}
                   </TabsContent>
                   <TabsContent value="review">
-                    <p className="py-12 text-center text-sm text-slate-500">
-                      Review recommendations waiting for operator approval.
-                    </p>
+                    {displayedAnomalies.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead>Anomaly</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead>Location</TableHead>
+                            <TableHead>Confidence</TableHead>
+                            <TableHead>Severity</TableHead>
+                            <TableHead className="text-right">Detected</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {displayedAnomalies.map((anomaly) => (
+                            <TableRow key={anomaly.id} className={settings.compactView ? "h-9" : undefined}>
+                              <TableCell>
+                                <div className="flex items-center gap-3">
+                                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100">
+                                    <AlertTriangle className="size-3.5 text-slate-500" />
+                                  </div>
+                                  <div>
+                                    <Link href={`/anomalies/${anomaly.id}`} className="font-medium text-[#17211f] underline-offset-4 hover:text-emerald-700 hover:underline">
+                                      {anomaly.type}
+                                    </Link>
+                                    <p className="text-[11px] text-slate-400">{anomaly.id}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-xs text-slate-500">{anomaly.source}</TableCell>
+                              <TableCell className="text-xs text-slate-500">{anomaly.location}</TableCell>
+                              <TableCell className="text-xs font-medium text-slate-600">{anomaly.score}</TableCell>
+                              <TableCell>
+                                <SeverityBadge severity={anomaly.severity as keyof typeof severityStyles} />
+                              </TableCell>
+                              <TableCell className="text-right text-xs text-slate-400">{anomaly.time}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <p className="py-12 text-center text-sm text-slate-500">No medium-risk anomalies requiring review. All recommendations addressed.</p>
+                    )}
                   </TabsContent>
                 </Tabs>
               </CardContent>

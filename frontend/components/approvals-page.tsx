@@ -232,7 +232,7 @@ function ActionDialog({
             onClick={() => onConfirm(comment)}
             className={
               isApproval
-              ? "bg-[#0B4F4A] text-white hover:bg-[#093D38]"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                 : "bg-red-600 text-white hover:bg-red-700"
             }
           >
@@ -312,7 +312,7 @@ export function ApprovalsPage() {
               queue synced
             </div>
             <div className="flex size-8 items-center justify-center rounded-full bg-[#d8f36b] text-xs font-bold text-[#17211f]">
-              AS
+              VW
             </div>
           </div>
         </header>
@@ -493,7 +493,7 @@ export function ApprovalsPage() {
                             <Button
                               size="sm"
                               onClick={() => openAction(item, "approve")}
-                              className="bg-[#17211f] text-white hover:bg-[#263632]"
+                              className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                             >
                               <Check /> Approve
                             </Button>
