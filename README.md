@@ -1,202 +1,376 @@
 # Warehouse AI Control Center
 
-Agentic data-quality control center for the Warehouse AI hackathon: ingests
-the 6-sheet SAP-style workbook, runs deterministic anomaly detection,
-correlates related issues across sheets with an LLM-driven agent pipeline,
-scores business impact, proposes a corrective action, and pauses for human
-approval before anything is "executed." Everything is logged to an
-append-only audit trail.
+A real-time **warehouse data-quality & anomaly control center** powered by a
+Node.js/TypeScript backend, a Next.js frontend, and a small fleet of
+agentic AI helpers. The system ingests an SAP-style xlsx workbook covering
+inventory, master data, deliveries and vendors, mirrors it into SQLite,
+runs a deterministic rule engine to detect anomalies, correlates them by
+material/vendor, and — when the operator asks for it — calls an LLM to
+generate a plain-English root cause + business impact + recommended
+action. Nothing is executed automatically: every change is captured in an
+append-only audit log and gated behind an operator approve/reject step.
 
-The repository includes the Node.js/TypeScript backend and Next.js frontend.
-The authoritative workbook is committed at
-`data/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL.xlsx`. The backend uses
-that file by default, while `WORKBOOK_PATH` can override it for another
-dataset.
+Authoritative workbook: [`data/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL.xlsx`](data/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL.xlsx). Override via `WORKBOOK_PATH` in `backend/.env`.
 
-Start the backend from `backend/` with `npm start`, then start the frontend
-from `frontend/` with `npm run dev`. Open `http://localhost:3000` for the
-application; it reads workbook-backed data from the API on port 8000.
-
-## Architecture at a glance
-
-```
-Excel workbook -> ingestion (pandas) -> PostgreSQL (raw mirror tables)
-                                              |
-                                   deterministic rule engine
-                                    (app/detection/*.py)
-                                              |
-                                        Anomaly rows
-                                              |
-                              app/agents/orchestrator.py
-                          clusters anomalies by Material/Vendor
-                                              |
-                        LangGraph pipeline (app/agents/graph.py)
-              root_cause -> impact -> resolution -> [PAUSE: human approval] -> apply_action
-                                              |
-                                     Incident + Action rows
-                                              |
-                                   FastAPI (app/api/v1/*)  <----->  Next.js frontend
-```
-
-## Prerequisites
-
-- Python 3.11+ (3.12 used in the Dockerfile)
-- Docker + Docker Compose (for the easy path), or a local PostgreSQL 16
-- An LLMaaS API key. **We don't yet know the exact wire format** — the
-  client at `app/llm/client.py` assumes an OpenAI-compatible
-  `/chat/completions` + `/embeddings` API (the common case for internal
-  LLM gateways). If yours is different, that file is the only place you
-  need to change — see its docstring.
-
-## Quickstart (Docker Compose)
-
-```bash
-cd warehouse-ai
-cp backend/.env.example backend/.env
-# edit backend/.env: set LLM_BASE_URL / LLM_API_KEY / LLM_MODEL to your real LLMaaS values
-
-docker compose up --build
-```
-
-This starts Postgres and the backend on `http://localhost:8000`. Interactive
-API docs: `http://localhost:8000/docs`.
-
-Then load the dataset and run detection + agent correlation:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/ingest/run \
-  -F "file=@/path/to/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL_2.xlsx"
-```
-
-This ingests, detects, and kicks off one agent pipeline run per anomaly
-cluster in the background. Each run pauses at the human-approval step —
-check `GET /api/v1/actions?status=pending_approval` to see what's waiting,
-then:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/actions/<action_id>/approve \
-  -H "Content-Type: application/json" \
-  -d '{"decided_by": "your-name"}'
-```
-
-## Quickstart (no Docker — local Postgres already running)
-
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-cp .env.example .env   # edit DATABASE_URL to point at your local Postgres, and set LLM_* values
-
-# One-shot CLI demo (ingest -> detect -> correlate), no frontend needed:
-python scripts/run_pipeline.py /path/to/workbook.xlsx
-
-# Or run the API server:
-uvicorn app.main:app --reload
-```
-
-Run the test suite (no DB or LLM key needed — pure unit tests on the
-detection rules):
-
-```bash
-pytest
-```
-
-## What's already verified working
-
-Before handing this off, the following was run for real against your actual
-dataset (not just imagined):
-
-- Full ingestion of all 6 sheets into Postgres — row counts match the
-  workbook exactly (61 / 82 / 50 / 120 / 80 / 25).
-- The full deterministic detection engine — **168 anomalies across 23 type
-  codes** (A1–F2 plus X1/X2), matching hand-verified counts from the raw
-  workbook (e.g. 11 blocked-qty-exceeds-on-hand, 22 over-capacity bins, 18
-  dispatch-exceeds-stock cross-system anomalies).
-- `pytest` — 8/8 unit tests passing on the rule functions.
-- Every module imports cleanly, including the full LangGraph pipeline and
-  every FastAPI route.
-- Live API calls against real ingested data: `/health`, `/api/v1/kpis`,
-  `/api/v1/anomalies`, `/api/v1/audit-log`, `/api/v1/materials/{id}/360` all
-  return correct, sane data.
-
-**Not yet verified**: the LLM-driven part of the agent pipeline
-(root-cause/impact/resolution nodes and the human-approval interrupt/resume
-cycle), since that requires a real LLMaaS key, which wasn't available yet.
-The graph compiles and imports correctly; run
-`python scripts/run_pipeline.py <workbook>` once you've filled in real
-`LLM_*` values in `.env` to exercise it end-to-end for the first time — and
-budget time for prompt-tuning, since this is the one part that hasn't run
-against a live model yet.
-
-## Known limitations to be aware of (not bugs — deliberate hackathon-timeline tradeoffs)
-
-1. **LangGraph's `MemorySaver` checkpointer is in-process only.** A paused
-   (awaiting-approval) run lives in the backend process's memory. This is
-   fine for a single `uvicorn --workers 1` process (already the default —
-   see the Dockerfile), but a restart loses any run that's mid-approval,
-   and it will not work with multiple workers. If you have time, swap it
-   for `langgraph-checkpoint-postgres` before the final demo so a restart
-   doesn't lose in-flight approvals.
-2. **No Alembic migrations** — the schema is created via
-   `Base.metadata.create_all()` on startup. Fine since there's exactly one
-   schema version; add Alembic only if the schema needs to evolve after
-   data already exists in a deployed instance.
-3. **`find_similar_material_descriptions` uses fuzzy string matching**
-   (`difflib`), not real embeddings yet, since the LLMaaS embeddings
-   endpoint spec wasn't available. The function signature and return shape
-   are already what the embeddings version would return — swapping the
-   implementation later doesn't require changing any agent prompt.
-4. **`data_health_pct` in `/api/v1/kpis`** is a simple proxy (% of distinct
-   materials touched by zero anomalies). Because this dataset is densely
-   seeded with issues on purpose, this number will look low (~6-7%) — that's
-   expected, not a bug, but tune the formula if it reads as too alarming
-   for a demo audience.
-5. **D5 (route vs. ship-to mismatch)** is a light heuristic in the absence
-   of a customer-country field in this simplified extract — documented
-   inline in `app/detection/rules.py`.
-
-## Suggested 2-developer split
-
-**Dev A — Data & Platform**
-Owns: `app/models/`, `app/ingestion/`, `app/detection/`, `app/api/v1/kpis.py`,
-`app/api/v1/anomalies.py`, `app/api/v1/materials.py`, Docker/EC2 deployment.
-Best first tasks: confirm the detection rules against any dataset variant
-judges introduce; add any additional single-sheet checks you want beyond
-the 20 already implemented.
-
-**Dev B — Agentic AI**
-Owns: `app/agents/`, `app/llm/`, `app/api/v1/actions.py`,
-`app/api/v1/ingest.py`, `app/api/v1/ws.py`.
-Best first tasks: once you have the real LLMaaS key, run
-`scripts/run_pipeline.py` and tune the prompts in `app/agents/prompts.py`
-based on actual model output; consider swapping `MemorySaver` for a
-persistent checkpointer if time allows.
-
-Agree the API contract in `app/schemas/` on day one (it's already written —
-treat changes to those files as requiring a quick sync between you two)
-so the Next.js frontend developer(s) can build against mocked responses
-from `/docs` without waiting on either of you.
+---
 
 ## Repo layout
 
 ```
-backend/
-  app/
-    api/v1/          FastAPI routers (kpis, incidents, anomalies, actions, audit, ingest, materials, ws)
-    agents/           LangGraph pipeline, tools, prompts, structured outputs
-    detection/        Deterministic rule engine (single-sheet + cross-system)
-    ingestion/        Excel -> Postgres loader
-    llm/              LLMaaS client abstraction (the one file to change per real API spec)
-    models/           SQLAlchemy models (raw mirrors + workflow tables)
-    schemas/          Pydantic API request/response models
-    config.py         Env-driven settings
-    main.py           FastAPI app
-  scripts/run_pipeline.py   CLI end-to-end demo run
-  tests/                     Unit tests for detection rules
-  Dockerfile
-  requirements.txt
-  .env.example
-data/                  Drop the workbook here for docker-compose's volume mount
-docker-compose.yml
+backend/                Node 24 + TypeScript (native --experimental-strip-types)
+  src/
+    server.ts           entry point
+    api.ts              HTTP router (no Express)
+    db.ts               SQLite schema + audit-log helpers
+    config.ts           env-driven settings
+    workbook/           excelReader.ts + schemaValidator.ts
+    services/
+      ingestionService.ts  workbook -> SQLite mirror tables
+      ruleEngine.ts        5 deterministic detection rules
+      llmService.ts        LLMaaS IDP OAuth + chat completions
+    scripts/inspectWorkbook.ts
+
+frontend/               Next.js 16 + React 19 + Tailwind (Turbopack)
+  app/                  route groups: /, /anomalies, /approvals, /dispatch-flow
+  components/           control-tower, anomaly-*, approvals, vendors, etc.
+  lib/api.ts            typed API client (types are shared with backend)
+  lib/workbook-api.ts   thin helper for /api/workbook/:table
+
+data/                   authoritative xlsx workbook
+docker-compose.yml      Postgres + backend + frontend (optional path)
 ```
+
+---
+
+## Prerequisites
+
+- **Node.js 24+** (uses the native `--experimental-strip-types` flag and the
+  built-in `node:sqlite` module — no external SQLite binary needed).
+- No native compilation. The only backend dep is `exceljs` (pure JS xlsx
+  parser, cross-platform). Everything else uses Node built-ins.
+- Optional: an LLMaaS OAuth client id / secret if you want the on-demand LLM
+  analysis button to work. Without it the deterministic rule engine still
+  runs; only the "Generate AI analysis" button is disabled.
+
+---
+
+## Running backend + frontend (macOS / Linux / Windows)
+
+Open **two terminals**.
+
+**Terminal 1 — backend (port 8000):**
+
+```bash
+cd backend
+npm install           # first time only
+cp .env.example .env  # then edit .env: workbook path is optional; LLMAAS_IDP_* only needed for on-demand AI analysis
+npm run dev
+```
+
+Expected log lines:
+
+```
+Warehouse AI backend starting...
+Environment: development
+Workbook path: .../data/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL.xlsx
+Pipeline status: ready
+Warehouse AI API listening on http://localhost:8000
+```
+
+**Terminal 2 — frontend (port 3000):**
+
+```bash
+cd frontend
+npm install     # first time only
+npm run dev
+```
+
+Expected: `Ready in <ms>` from Next.js + `Local: http://localhost:3000`.
+
+**One-time step — ingest the workbook** so the SQLite mirror + anomalies
+are populated (only needed once per fresh checkout; the sqlite file persists):
+
+```bash
+curl -X POST http://localhost:8000/api/ingest -H 'Content-Type: application/json' -d '{}'
+```
+
+You can also click **Run AI scan** on the Control Tower to do the same
+through the UI.
+
+### Confirm both are up
+
+```bash
+curl http://localhost:8000/health            # {"status":"ok","service":"warehouse-ai-backend"}
+curl http://localhost:8000/api/dashboard     # counts + sourceTables
+curl -o /dev/null -w '%{http_code}\n' http://localhost:3000   # 200
+```
+
+Then open http://localhost:3000 — Control Tower should show the KPI cards
+populated from real workbook data.
+
+### Docker Compose (optional single-command path)
+
+```bash
+docker compose up --build
+```
+
+Boots Postgres + backend + frontend together — but note the current backend
+code targets SQLite (`node:sqlite`), so use the two-terminal flow above
+unless you're actively porting the backend to Postgres.
+
+---
+
+## How the pieces talk to each other
+
+```
+                +-----------------------------+
+                |  data/*.xlsx (authoritative)|
+                +--------------+--------------+
+                               |  exceljs (pure JS)
+                               v
++------------------+   ingest  +--------------------+
+|  Next.js UI (3000)|<---HTTP--| Node backend (8000)|
++------------------+   /api/*  +---------+----------+
+     ^         ^                          |
+     |         |                          v
+     |         |                +---------+---------+
+     |         |                |  SQLite (mirror)  |
+     |         |                |  material_master  |
+     |         |                |  inventory_stock  |
+     |         |                |  warehouse_bin    |
+     |         |                |  deliveries_...   |
+     |         |                |  purchase_replen. |
+     |         |                |  vendor_master    |
+     |         |                |  anomalies        |
+     |         |                |  anomaly_decisions|
+     |         |                |  audit_log        |
+     |         |                +---------+---------+
+     |         |                          |
+     |         |     rule engine (5 rules, deterministic)
+     |         |                          |
+     |         |                          v
+     |         |                     anomalies rows
+     |         |                          |
+     |         +--------- POST -----------+
+     |          /api/anomalies/:id/decision  (approve / reject)
+     |
+     +---------- POST /api/anomalies/:id/ai-analysis
+                 --> LLM (Root Cause + Impact + Resolution)
+```
+
+---
+
+## HTTP API (all live routes)
+
+| Method | Path                                | Purpose                                         |
+| ------ | ----------------------------------- | ----------------------------------------------- |
+| GET    | `/health`                           | liveness probe                                  |
+| GET    | `/api/dashboard`                    | KPI counts + list of ingested source tables     |
+| POST   | `/api/ingest`                       | (re)ingest the workbook + rerun detection       |
+| GET    | `/api/anomalies`                    | all detected anomalies + decision status        |
+| POST   | `/api/anomalies/:id/decision`       | operator approve / reject (audit-logged)        |
+| POST   | `/api/anomalies/:id/ai-analysis`    | on-demand LLM narrative (audit-logged)          |
+| GET    | `/api/workbook/:table`              | paginated raw workbook rows for a mirrored sheet |
+| GET    | `/api/impact`                       | live business-impact figures (€ at risk, hrs, coverage) |
+| GET    | `/api/correlations`                 | anomaly clusters grouped by `material\|plant` — the root-cause tree data |
+| GET    | `/api/vendors/enriched`             | vendor master joined with purchase & material data |
+| GET    | `/api/audit-log?limit=N`            | append-only trail: ingest / decision / AI-analysis events |
+
+CORS is open to any origin (`*`). No auth on the API — this is a
+hackathon prototype, not production.
+
+---
+
+## Agentic AI — how the three "agents" actually work
+
+The problem statement asks for a Data Validation Agent, a Root Cause Agent
+and a Resolution Agent. Here's what each one maps to in this codebase:
+
+### 1. Data Validation Agent → deterministic rule engine
+Location: [ruleEngine.ts](backend/src/services/ruleEngine.ts). Runs
+every time `/api/ingest` is called. Five SQL-driven checks against the
+mirrored workbook tables:
+
+| Rule id                    | Sheet joined                    | Fires when                                                | Severity |
+| -------------------------- | ------------------------------- | --------------------------------------------------------- | -------- |
+| `missing-unit-of-measure`  | Material_Master                 | `base_uom` is null/blank                                  | high     |
+| `impossible-stock-state`   | Inventory_Stock                 | `qty_on_hand < 0` **or** `blocked_qty > qty_on_hand`      | critical |
+| `dispatch-exceeds-stock`   | Deliveries_Dispatch ↔ Inventory | delivery `order_qty > qty_on_hand` for that material+plant | critical |
+| `vendor-risk`              | Vendor_Master                   | `procurement_block=Y` **or** quality `D`/`E` **or** `on_time_delivery<90` | high     |
+| `reorder-threshold-risk`   | Material_Master ↔ Inventory     | `qty_on_hand <= reorder_point`                            | medium   |
+
+Every detected anomaly is upserted into the `anomalies` table with a
+`business_key` (e.g. `MAT-100003|1710`) so cross-sheet issues on the same
+material can be correlated later.
+
+### 2. Root Cause Agent → correlation + LLM narrative
+- **Deterministic layer** ([`GET /api/correlations`](backend/src/api.ts)):
+  groups anomalies by `business_key`, returning clusters where the same
+  material+plant is flagged by multiple rules across multiple sheets. That's
+  the "single root-cause tree" the problem statement describes — e.g. one
+  MAT-100003 cluster surfaces `impossible-stock-state` + `dispatch-exceeds-stock`
+  + `reorder-threshold-risk` at once.
+- **LLM layer** ([`llmService.ts`](backend/src/services/llmService.ts)):
+  invoked from `POST /api/anomalies/:id/ai-analysis` when the operator
+  clicks *Generate AI analysis*. Calls the LLMaaS OAuth token endpoint
+  (VW Group Keycloak realm) to get a bearer token, then hits the
+  OpenAI-compatible `/chat/completions` API with a strict
+  `response_format: json_object` prompt. Returns `{summary, rootCause,
+  businessImpact, recommendedAction, confidence}` grounded strictly in the
+  evidence JSON captured at detection time.
+
+### 3. Resolution Agent → deterministic recommendation + operator approval
+- Every anomaly is enriched with a deterministic recommendation via
+  `recommendationFor(type)` in [api.ts](backend/src/api.ts) (e.g.
+  "Split the delivery and trigger replenishment before goods issue.").
+- The operator sees it on the Approvals / Anomaly Investigation page.
+  `POST /api/anomalies/:id/decision` writes to `anomaly_decisions` **and**
+  appends an `audit_log` entry so nothing is executed silently.
+- The LLM's `recommendedAction` (from step 2) sits alongside the
+  deterministic one as an advisory second opinion — the operator remains
+  the final decision maker.
+
+### Where the LLM is (and isn't) invoked
+- ✅ On-demand: user clicks *Generate AI analysis* on the investigation page.
+- ✅ Every LLM call is audit-logged with model name + confidence.
+- ❌ NOT during ingest, NOT during rule evaluation, NOT on schedule. This
+  is deliberate — deterministic detection stays hermetic and reproducible;
+  the LLM only adds narrative on operator demand.
+
+---
+
+## Which UI page renders which xlsx sheet
+
+The frontend previously had a lot of hardcoded/dummy figures. As of this
+revision each surface renders real data:
+
+| Page                          | Driven by                                                           |
+| ----------------------------- | ------------------------------------------------------------------- |
+| Control Tower KPI cards       | `/api/dashboard` (SQLite `anomalies` + `workbook_runs`)             |
+| Control Tower business impact | `/api/impact` (computed shortfall × unit-price assumption)          |
+| Control Tower recent actions  | `/api/audit-log` (last 6 events: ingest, approve, reject, AI)       |
+| Control Tower priority queue  | `/api/anomalies` (severity-sorted, confidence-filtered)             |
+| Control Tower pipeline health | `/api/dashboard` (sourceTables count + totalRecords)                |
+| Anomaly Queue                 | `/api/anomalies`                                                    |
+| Anomaly Investigation         | `/api/anomalies` + `POST /api/anomalies/:id/ai-analysis`. Evidence JSON is parsed and displayed field-by-field. |
+| Approvals                     | `/api/anomalies` + `POST /api/anomalies/:id/decision`               |
+| Inventory Health              | `/api/workbook/{material_master,inventory_stock,warehouse_bin}`     |
+| Dispatch Flow                 | `/api/workbook/{deliveries_dispatch,material_master,inventory_stock}` |
+| Vendors                       | `/api/vendors/enriched` (Vendor_Master + Purchase_Replenish + Material_Master joined server-side) |
+| Data Sources                  | `/api/workbook/*` — counts per sheet                                |
+| Sidebar anomaly count         | `/api/dashboard`                                                    |
+
+The type-only files under `frontend/data/` remain as shared TypeScript
+interfaces; no runtime dummy arrays are exported from them.
+
+---
+
+## How well does this solve the problem statement?
+
+| Problem-statement claim                                             | Status in this repo                                                                                |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| "Continuously ingests inventory, master data, and dispatch streams" | ✅ Ingestion covers all 6 SAP-style sheets. Continuous = re-run `POST /api/ingest`; no scheduler yet. |
+| "Catches bad records early"                                         | ✅ 5-rule deterministic engine runs on every ingest, producing typed `anomalies` rows.              |
+| "Correlates isolated anomalies into single root-cause trees"        | ✅ `/api/correlations` groups by `business_key` (`material\|plant`) across sheets. Cluster count / severity mix visible. |
+| "Live Radar dashboard"                                              | ✅ Control Tower KPI cards, priority queue, pipeline health — all live.                            |
+| "Actionable, automated fix recommendations"                         | ✅ Deterministic per-rule recommendations + optional LLM-generated narrative.                       |
+| "One-click database write-back approval workflow"                   | 🟡 One-click Approve / Reject wired to the audit log **and** the decision table, but there is no actual write-back to a source-of-truth ERP — the workbook is read-only. See enhancements below. |
+| "Full audit logging"                                                | ✅ `audit_log` table + `GET /api/audit-log`. Every ingest, decision and LLM call is captured.       |
+| "Human always in control of execution"                              | ✅ Nothing runs automatically. LLM narrative is generated only on operator demand.                  |
+
+---
+
+## Enhancement opportunities (functional, not cosmetic)
+
+1. **Auto-run correlations on ingest** — expose `/api/correlations` on the
+   Control Tower as a "Root cause trees" panel so operators see clusters
+   without having to hit the endpoint by hand.
+2. **Explain-any-anomaly with cluster context** — pass the full cluster
+   evidence (not just the single anomaly) into `analyzeAnomalyWithLlm`
+   when the LLM is asked to explain a member of a cluster.
+3. **Scheduled re-ingest** — a small `setInterval` in `server.ts` or a
+   file-watcher on the workbook path would give true "continuous"
+   monitoring without a manual POST.
+4. **Persist LLM analyses** — currently transient. Add an
+   `anomaly_ai_analyses` table so the same anomaly doesn't get re-billed
+   to the LLM every time it's viewed.
+5. **Real ERP write-back** — the "approved" path today only marks the
+   anomaly; wire in a mock ERP endpoint or a CSV export so an operator can
+   see the corrective payload that *would* be pushed.
+6. **Bulk decision endpoint** — `POST /api/anomalies/bulk-decision` for
+   whole-cluster approvals when the operator trusts the correlation.
+7. **Workbook diff on re-ingest** — track row-level changes between runs so
+   the audit trail shows which records changed, not just totals.
+8. **Server-side pagination** on `/api/anomalies` (currently returns all).
+
+---
+
+## Edge cases and known limitations
+
+Handled today:
+
+- **Cross-platform xlsx** — parser is `exceljs` (pure JS); no PowerShell /
+  Excel COM, no `xlsx` package (that one has open prototype-pollution
+  and ReDoS advisories).
+- **Header sanitisation** — sheet column names are lowercased and
+  snake_cased on ingest so `"Qty On Hand"` → `qty_on_hand` regardless of
+  workbook capitalisation.
+- **Rule dedup** — every rule checks for an existing anomaly with the
+  same `(type, business_key, sheet)` before inserting.
+- **CORS** — open with correct preflight for GET/POST/OPTIONS.
+- **LLM outage** — `/api/anomalies/:id/ai-analysis` returns 502 with a
+  human-readable message; UI shows it inline; deterministic recommendation
+  is still visible.
+- **Missing LLM config** — the LLM route throws a clear
+  `LLM IDP is not configured` message; nothing else is affected.
+- **Empty vendor purchase history** — `/api/vendors/enriched` returns
+  `open_orders: 0`, `next_delivery: null`, and the UI shows "No open PO"
+  rather than a fake date.
+- **Missing workbook sheet** — ingestion fails loudly with the missing
+  sheet names; the DB is left in its previous state.
+- **`.env` secret exposure** — `backend/.env` is git-ignored; only
+  `.env.example` is committed. The `--env-file-if-exists` flag on the npm
+  scripts means the app also boots without a `.env`.
+
+Known limitations (documented, not bugs):
+
+- **Re-ingest wipes anomaly history** — `runDetection()` deletes the
+  `anomalies` table before rerunning. Historical trending isn't supported
+  today. Approval decisions on prior anomalies are orphaned when their id
+  is re-issued.
+- **Business-impact `€` figure uses a fixed unit-price assumption** (see
+  `unitPriceAssumptionEuros` in `/api/impact`). Judged demo-appropriate;
+  swap for real per-material pricing when the workbook has it.
+- **Row numbering** in the SQLite mirror is 1-based including headers
+  (`__rowNumber: index + 2`) — matches what an operator sees in Excel.
+- **Correlation clusters only fire when `business_key` matches exactly**
+  — a plant-suffix mismatch across sheets would break the join. Sheet
+  loaders trim whitespace but do not normalise plant codes.
+- **Frontend dev restarts are Turbopack-based** — module edits hot-reload,
+  but a change to a `use client` component's exported name still needs a
+  full refresh.
+
+---
+
+## Quick test loop
+
+```bash
+# 1) start both processes (two terminals — see above)
+
+# 2) reingest + verify anomalies detected
+curl -X POST http://localhost:8000/api/ingest -H 'Content-Type: application/json' -d '{}'
+curl -s http://localhost:8000/api/dashboard
+
+# 3) see clusters (root-cause trees)
+curl -s http://localhost:8000/api/correlations | head -c 400
+
+# 4) approve the first anomaly and see it in the audit log
+curl -X POST http://localhost:8000/api/anomalies/1/decision \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"approved","comment":"looks legit","actor":"demo"}'
+curl -s 'http://localhost:8000/api/audit-log?limit=3'
+
+# 5) (only if LLMAAS_IDP_* is configured)
+curl -X POST http://localhost:8000/api/anomalies/1/ai-analysis
+```
+

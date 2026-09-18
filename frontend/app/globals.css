@@ -4,11 +4,45 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Poppins font stack */
+@layer base {
+  * {
+    font-family: var(--font-poppins, 'Poppins', system-ui, -apple-system, sans-serif);
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* Card hover effect with left border highlight */
+@layer components {
+  .card-hover {
+    @apply transition-all duration-200 ease-out border-l-4 border-l-transparent hover:border-l-[#d8f36b] hover:shadow-md hover:-translate-x-0.5;
+  }
+  
+  .card-hover-accent {
+    @apply transition-all duration-200 ease-out border-l-4 border-l-transparent hover:border-l-emerald-500 hover:shadow-md hover:-translate-x-0.5;
+  }
+  
+  .card-hover-primary {
+    @apply transition-all duration-200 ease-out border-l-4 border-l-transparent hover:border-l-blue-600 hover:shadow-md hover:-translate-x-0.5;
+  }
+}
+
+/* Smooth transitions for all interactive elements */
+@layer base {
+  button, a, [role="button"] {
+    @apply transition-colors duration-150 ease-in-out;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-poppins);
+  --font-mono: var(--font-poppins);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -49,35 +83,37 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  /* Light mode - white backgrounds with high contrast text */
+  --background: oklch(1 0 0);           /* Pure white */
+  --foreground: oklch(0.125 0 0);       /* Almost black (#1a1a1a) - higher contrast */
+  --card: oklch(1 0 0);                 /* Pure white */
+  --card-foreground: oklch(0.125 0 0);  /* Almost black */
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.125 0 0);
+  --primary: oklch(0.4 0.2 100);        /* Darker lime for better contrast */
+  --primary-foreground: oklch(1 0 0);   /* White text on primary */
+  --secondary: oklch(0.95 0 0);
+  --secondary-foreground: oklch(0.125 0 0);
+  --muted: oklch(0.88 0 0);             /* Darker background */ 
+  --muted-foreground: oklch(0.45 0 0);   /* Darker mid-gray for better contrast */
+  --accent: oklch(0.35 0.2 100);        /* Lime green accent */
+  --accent-foreground: oklch(1 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.88 0 0);             /* Darker border for better visibility */
+  --input: oklch(0.95 0 0);             /* Input bg slightly off-white */
+  --ring: oklch(0.4 0.2 100);           /* Focus ring uses accent color */
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  /* Sidebar dark theme stays as is */
+  --sidebar: oklch(0.12 0 0);           /* Dark background */
+  --sidebar-foreground: oklch(0.95 0 0); /* Light text */
+  --sidebar-primary: oklch(0.35 0.2 100);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.35 0.2 100);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);

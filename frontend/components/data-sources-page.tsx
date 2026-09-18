@@ -76,7 +76,7 @@ function SummaryCard({
   tone: string;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardContent className="flex items-start justify-between p-5">
         <div>
           <p className="text-xs font-medium text-slate-500">{label}</p>
@@ -103,7 +103,7 @@ function SourceTable({
   onSelect: (source: DataSourceRecord) => void;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
         <div className="flex items-center justify-between">
           <div>

@@ -63,7 +63,7 @@ function SummaryCard({
   tone: string;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardContent className="flex items-start justify-between p-5">
         <div>
           <p className="text-xs font-medium text-slate-500">{label}</p>
@@ -138,7 +138,7 @@ function WarehouseHealthCard({
 
 function MaterialRiskTable({ records }: Readonly<{ records: MaterialRisk[] }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
         <div className="flex items-center justify-between">
           <div>
@@ -316,7 +316,7 @@ export function InventoryHealthPage() {
             />
           </section>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-            <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+            <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
               <CardHeader className="px-5 pb-3 pt-5">
                 <CardTitle>Inventory overview</CardTitle>
                 <p className="text-xs text-slate-400">
@@ -358,7 +358,7 @@ export function InventoryHealthPage() {
                 </div>
               </CardContent>
             </Card>
-            <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+            <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
               <CardHeader className="px-5 pb-3 pt-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -405,7 +405,7 @@ export function InventoryHealthPage() {
               <MaterialRiskTable records={filteredMaterials} />
             </div>
             <div className="space-y-6">
-              <Card className="border-0 bg-[#17211f] text-white shadow-[0_2px_12px_rgba(23,33,31,0.08)]">
+              <Card className="border-0 bg-[#0B4F4A] text-white shadow-[0_2px_12px_rgba(11,79,74,0.08)]">
                 <CardHeader className="border-b border-white/10 px-5 pb-3 pt-5">
                   <div className="flex items-center justify-between">
                     <div>
@@ -442,7 +442,7 @@ export function InventoryHealthPage() {
                   </Link>
                 </CardContent>
               </Card>
-              <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+              <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
                 <CardHeader className="px-5 pb-3 pt-5">
                   <CardTitle>Replenishment recommendations</CardTitle>
                   <p className="text-xs text-slate-400">

@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --experimental-strip-types --watch src/server.ts",
-    "start": "node --experimental-strip-types src/server.ts",
-    "inspect": "node --experimental-strip-types src/scripts/inspectWorkbook.ts"
+    "dev": "node --experimental-strip-types --env-file-if-exists=.env --watch src/server.ts",
+    "start": "node --experimental-strip-types --env-file-if-exists=.env src/server.ts",
+    "inspect": "node --experimental-strip-types --env-file-if-exists=.env src/scripts/inspectWorkbook.ts"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
   }
 }

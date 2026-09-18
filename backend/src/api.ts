@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { db, initializeDatabase } from './db.ts';
+import { db, initializeDatabase, logAudit } from './db.ts';
 import { appConfig } from './config.ts';
 import { ingestWorkbook } from './services/ingestionService.ts';
 import { runDetection } from './services/ruleEngine.ts';
@@ -82,6 +82,15 @@ export const createApiServer = (port: number) => {
       try {
         const summary = await ingestWorkbook(filePath);
         const anomalies = runDetection();
+
+        logAudit({
+          eventType: 'workbook.ingested',
+          entityType: 'workbook',
+          entityId: filePath,
+          actor: 'system',
+          summary: `Ingested ${summary.totalRows} rows across ${summary.sheetCount} sheets; detected ${anomalies.length} anomalies.`,
+          payload: { filePath, totalRows: summary.totalRows, sheetCount: summary.sheetCount, anomalyCount: anomalies.length, valid: summary.valid },
+        });
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(
@@ -166,6 +175,20 @@ export const createApiServer = (port: number) => {
         `INSERT INTO anomaly_decisions (anomaly_id, status, comment) VALUES (?, ?, ?)
          ON CONFLICT(anomaly_id) DO UPDATE SET status = excluded.status, comment = excluded.comment, decided_at = CURRENT_TIMESTAMP`,
       ).run(anomalyId, status, comment);
+
+      const anomalyRow = db.prepare('SELECT type, sheet, message, business_key FROM anomalies WHERE id = ?').get(anomalyId) as
+        | { type: string; sheet: string; message: string; business_key: string | null }
+        | undefined;
+      const actor = String(body.actor ?? 'operator');
+      logAudit({
+        eventType: `anomaly.${status}`,
+        entityType: 'anomaly',
+        entityId: anomalyId,
+        actor,
+        summary: `Operator ${status} anomaly AN-${anomalyId}${anomalyRow ? `: ${anomalyRow.message}` : ''}`,
+        payload: { anomalyId, status, comment, type: anomalyRow?.type, sheet: anomalyRow?.sheet, businessKey: anomalyRow?.business_key },
+      });
+
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true, anomalyId, status, comment }));
       return;
@@ -186,6 +209,14 @@ export const createApiServer = (port: number) => {
           message: String(row.message), evidence: row.evidence ? String(row.evidence) : null,
           business_key: row.business_key ? String(row.business_key) : null,
           deterministic_recommendation: recommendation.recommendation,
+        });
+        logAudit({
+          eventType: 'anomaly.ai_analyzed',
+          entityType: 'anomaly',
+          entityId: anomalyId,
+          actor: `llm:${analysis.model || 'unknown'}`,
+          summary: `AI analysis generated for AN-${anomalyId}: ${analysis.summary?.slice(0, 160) ?? 'no summary'}`,
+          payload: { anomalyId, model: analysis.model, confidence: analysis.confidence },
         });
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ success: true, analysis }));
@@ -217,7 +248,7 @@ export const createApiServer = (port: number) => {
         'SELECT total_rows FROM workbook_runs ORDER BY id DESC LIMIT 1',
       ).get() as { total_rows?: number } | undefined;
       const sheetCounts = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('workbook_runs','anomalies') ORDER BY name",
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('workbook_runs','anomalies','anomaly_decisions','audit_log','readme','data_dictionary') ORDER BY name",
       ).all() as Array<{ name: string }>;
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -233,6 +264,168 @@ export const createApiServer = (port: number) => {
           sourceTables: sheetCounts.map((entry) => entry.name),
         }),
       );
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/audit-log') {
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50), 1), 500);
+      const entityType = url.searchParams.get('entity_type');
+      const entityId = url.searchParams.get('entity_id');
+      let sql = 'SELECT id, event_type, entity_type, entity_id, actor, summary, payload, created_at FROM audit_log';
+      const params: (string | number)[] = [];
+      const filters: string[] = [];
+      if (entityType) { filters.push('entity_type = ?'); params.push(entityType); }
+      if (entityId) { filters.push('entity_id = ?'); params.push(entityId); }
+      if (filters.length) sql += ' WHERE ' + filters.join(' AND ');
+      sql += ' ORDER BY id DESC LIMIT ?';
+      params.push(limit);
+      const rows = db.prepare(sql).all(...params);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(rows));
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/impact') {
+      const shortfallRow = db.prepare(`
+        SELECT COALESCE(SUM(CAST(COALESCE(d.order_qty, '0') AS REAL) - CAST(COALESCE(i.qty_on_hand, '0') AS REAL)), 0) AS shortfall_qty,
+               COUNT(*) AS affected_deliveries
+        FROM deliveries_dispatch d
+        LEFT JOIN inventory_stock i ON i.material = d.material AND i.plant = d.plant
+        WHERE CAST(COALESCE(d.order_qty, '0') AS REAL) > CAST(COALESCE(i.qty_on_hand, '0') AS REAL)
+      `).get() as { shortfall_qty: number; affected_deliveries: number };
+
+      const anomalyMix = db.prepare(`
+        SELECT severity, COUNT(*) AS c FROM anomalies GROUP BY severity
+      `).all() as Array<{ severity: string; c: number }>;
+      const bySeverity = Object.fromEntries(anomalyMix.map((row) => [row.severity, Number(row.c)])) as Record<string, number>;
+
+      const decidedCount = (db.prepare('SELECT COUNT(*) AS c FROM anomaly_decisions').get() as { c: number }).c;
+      const totalAnomalies = (db.prepare('SELECT COUNT(*) AS c FROM anomalies').get() as { c: number }).c;
+
+      const unitPriceEuros = 42;
+      const atRiskValue = Math.round(shortfallRow.shortfall_qty * unitPriceEuros);
+      const potentialDelayHours = Math.round((bySeverity.critical ?? 0) * 4 + (bySeverity.high ?? 0) * 2 + shortfallRow.affected_deliveries * 1.5);
+      const recoveryCoverage = totalAnomalies === 0 ? 100 : Math.round((decidedCount / totalAnomalies) * 100);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        atRiskValueEuros: atRiskValue,
+        shortfallQuantity: Math.round(shortfallRow.shortfall_qty),
+        affectedDeliveries: shortfallRow.affected_deliveries,
+        potentialDelayHours,
+        recoveryCoveragePercent: recoveryCoverage,
+        anomaliesBySeverity: bySeverity,
+        decidedCount,
+        totalAnomalies,
+        unitPriceAssumptionEuros: unitPriceEuros,
+      }));
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/correlations') {
+      const rows = db.prepare(`
+        SELECT business_key, COUNT(*) AS anomaly_count,
+               SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical_count,
+               SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high_count,
+               GROUP_CONCAT(DISTINCT type) AS anomaly_types,
+               GROUP_CONCAT(DISTINCT sheet) AS sheets,
+               MAX(created_at) AS latest,
+               MIN(id) AS first_anomaly_id
+        FROM anomalies
+        WHERE business_key IS NOT NULL AND business_key <> ''
+        GROUP BY business_key
+        HAVING anomaly_count >= 2
+        ORDER BY critical_count DESC, anomaly_count DESC
+        LIMIT 25
+      `).all() as Array<{
+        business_key: string;
+        anomaly_count: number;
+        critical_count: number;
+        high_count: number;
+        anomaly_types: string;
+        sheets: string;
+        latest: string;
+        first_anomaly_id: number;
+      }>;
+
+      const clusters = rows.map((row) => ({
+        businessKey: row.business_key,
+        anomalyCount: Number(row.anomaly_count),
+        criticalCount: Number(row.critical_count),
+        highCount: Number(row.high_count),
+        anomalyTypes: (row.anomaly_types ?? '').split(',').filter(Boolean),
+        sheetsInvolved: (row.sheets ?? '').split(',').filter(Boolean),
+        latestDetectedAt: row.latest,
+        firstAnomalyId: Number(row.first_anomaly_id),
+      }));
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ clusters, totalClusters: clusters.length }));
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/vendors/enriched') {
+      const vendorTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vendor_master'").get();
+      if (!vendorTableExists) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify([]));
+        return;
+      }
+      const vendors = db.prepare('SELECT * FROM vendor_master').all() as Array<Record<string, string | null>>;
+      const purchaseTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='purchase_replenish'").get();
+      const materialTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='material_master'").get();
+
+      const openOrdersByVendor = new Map<string, number>();
+      const nextDeliveryByVendor = new Map<string, string>();
+      const materialsByVendor = new Map<string, Set<string>>();
+      if (purchaseTableExists) {
+        const purchases = db.prepare('SELECT vendor, material, expected_delivery, po_status FROM purchase_replenish').all() as Array<{
+          vendor: string | null; material: string | null; expected_delivery: string | null; po_status: string | null;
+        }>;
+        for (const purchase of purchases) {
+          if (!purchase.vendor) continue;
+          const isOpen = !purchase.po_status || !/(closed|received|complete|delivered)/i.test(purchase.po_status);
+          if (isOpen) openOrdersByVendor.set(purchase.vendor, (openOrdersByVendor.get(purchase.vendor) ?? 0) + 1);
+          if (purchase.expected_delivery) {
+            const current = nextDeliveryByVendor.get(purchase.vendor);
+            if (!current || purchase.expected_delivery < current) {
+              nextDeliveryByVendor.set(purchase.vendor, purchase.expected_delivery);
+            }
+          }
+          if (purchase.material) {
+            const set = materialsByVendor.get(purchase.vendor) ?? new Set<string>();
+            set.add(purchase.material);
+            materialsByVendor.set(purchase.vendor, set);
+          }
+        }
+      }
+
+      const leadTimeByMaterial = new Map<string, number>();
+      if (materialTableExists) {
+        const materials = db.prepare('SELECT material, lead_time_days FROM material_master').all() as Array<{ material: string | null; lead_time_days: string | null }>;
+        for (const material of materials) {
+          if (!material.material) continue;
+          const days = Number(material.lead_time_days);
+          if (Number.isFinite(days)) leadTimeByMaterial.set(material.material, days);
+        }
+      }
+
+      const enriched = vendors.map((vendor) => {
+        const vendorId = vendor.vendor ?? '';
+        const linkedMaterials = Array.from(materialsByVendor.get(vendorId) ?? []);
+        const leadTimes = linkedMaterials.map((mat) => leadTimeByMaterial.get(mat)).filter((value): value is number => Number.isFinite(value));
+        const avgLeadTime = leadTimes.length ? Math.round(leadTimes.reduce((a, b) => a + b, 0) / leadTimes.length) : null;
+        return {
+          ...vendor,
+          open_orders: openOrdersByVendor.get(vendorId) ?? 0,
+          next_delivery: nextDeliveryByVendor.get(vendorId) ?? null,
+          linked_material_count: linkedMaterials.length,
+          average_lead_time_days: avgLeadTime,
+        };
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(enriched));
       return;
     }
 

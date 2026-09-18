@@ -89,7 +89,7 @@ function SummaryCard({
   tone: string;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardContent className="flex items-start justify-between p-5">
         <div>
           <p className="text-xs font-medium text-slate-500">{label}</p>
@@ -141,7 +141,7 @@ function FilterSelect({
 
 function VendorTable({ records }: Readonly<{ records: VendorRecord[] }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
         <div className="flex items-center justify-between">
           <div>
@@ -228,13 +228,62 @@ export function VendorsPage() {
   const [status, setStatus] = useState("all");
   const [risk, setRisk] = useState("all");
   useEffect(() => {
-    fetchWorkbookTable("vendor_master").then(({ rows }) => setVendors(rows.map((row) => {
-      const onTimeRate = Number(row.on_time_delivery ?? 0);
-      const blocked = String(row.procurement_block ?? "").toUpperCase() === "Y";
-      const status: VendorStatus = blocked ? "Blocked" : onTimeRate < 90 ? "At risk" : "Healthy";
-      const risk: VendorRisk = blocked ? "Critical" : onTimeRate < 80 ? "High" : onTimeRate < 90 ? "Medium" : "Low";
-      return { id: String(row.vendor ?? ""), name: String(row.vendor_name ?? "Unknown vendor"), region: String(row.country ?? "Unknown"), category: "Workbook vendor", openOrders: 0, onTimeRate, leadTime: "Not provided", status, risk, spend: "Not calculated", nextDelivery: "Not provided" };
-    }))).catch(() => setVendors([]));
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    fetch(`${apiBaseUrl}/api/vendors/enriched`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("Vendors unavailable"))))
+      .then((rows: Array<Record<string, string | number | null>>) => {
+        setVendors(rows.map((row) => {
+          const onTimeRate = Number(row.on_time_delivery ?? 0);
+          const blocked = String(row.procurement_block ?? "").toUpperCase() === "Y";
+          const openOrders = Number(row.open_orders ?? 0);
+          const leadTimeDays = row.average_lead_time_days;
+          const derivedStatus: VendorStatus = blocked ? "Blocked" : onTimeRate < 90 ? "At risk" : "Healthy";
+          const derivedRisk: VendorRisk = blocked ? "Critical" : onTimeRate < 80 ? "High" : onTimeRate < 90 ? "Medium" : "Low";
+          const linkedMaterials = Number(row.linked_material_count ?? 0);
+          const category = linkedMaterials > 0
+            ? `${linkedMaterials} linked material${linkedMaterials === 1 ? "" : "s"}`
+            : "No purchase orders";
+          return {
+            id: String(row.vendor ?? ""),
+            name: String(row.vendor_name ?? "Unknown vendor"),
+            region: String(row.country ?? "Unknown"),
+            category,
+            openOrders,
+            onTimeRate,
+            leadTime: leadTimeDays === null || leadTimeDays === undefined ? "n/a" : `${leadTimeDays} days`,
+            status: derivedStatus,
+            risk: derivedRisk,
+            spend: "Not tracked",
+            nextDelivery: row.next_delivery ? String(row.next_delivery) : "No open PO",
+          };
+        }));
+      })
+      .catch(async () => {
+        try {
+          const { rows } = await fetchWorkbookTable("vendor_master");
+          setVendors(rows.map((row) => {
+            const onTimeRate = Number(row.on_time_delivery ?? 0);
+            const blocked = String(row.procurement_block ?? "").toUpperCase() === "Y";
+            const derivedStatus: VendorStatus = blocked ? "Blocked" : onTimeRate < 90 ? "At risk" : "Healthy";
+            const derivedRisk: VendorRisk = blocked ? "Critical" : onTimeRate < 80 ? "High" : onTimeRate < 90 ? "Medium" : "Low";
+            return {
+              id: String(row.vendor ?? ""),
+              name: String(row.vendor_name ?? "Unknown vendor"),
+              region: String(row.country ?? "Unknown"),
+              category: "Vendor master only",
+              openOrders: 0,
+              onTimeRate,
+              leadTime: "n/a",
+              status: derivedStatus,
+              risk: derivedRisk,
+              spend: "Not tracked",
+              nextDelivery: "n/a",
+            };
+          }));
+        } catch {
+          setVendors([]);
+        }
+      });
   }, []);
   const filteredVendors = useMemo(
     () =>
@@ -249,7 +298,7 @@ export function VendorsPage() {
           (risk === "all" || vendor.risk === risk)
         );
       }),
-    [risk, search, status],
+    [vendors, risk, search, status],
   );
 
   return (
@@ -367,7 +416,7 @@ export function VendorsPage() {
               <VendorTable records={filteredVendors} />
             </div>
             <div className="space-y-6">
-              <Card className="border-0 bg-[#17211f] text-white shadow-[0_2px_12px_rgba(23,33,31,0.08)]">
+              <Card className="h-fit border-0 bg-[#0B4F4A] text-white shadow-[0_2px_12px_rgba(11,79,74,0.08)]">
                 <CardHeader className="border-b border-white/10 px-5 pb-3 pt-5">
                   <div className="flex items-center justify-between">
                     <div>
@@ -404,7 +453,7 @@ export function VendorsPage() {
                   </Link>
                 </CardContent>
               </Card>
-              <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+              <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
                 <CardHeader className="px-5 pb-3 pt-5">
                   <CardTitle>Supplier activity</CardTitle>
                   <p className="text-xs text-slate-400">

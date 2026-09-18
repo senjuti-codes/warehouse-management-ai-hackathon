@@ -93,7 +93,7 @@ function QueueSummary({
   icon: typeof Clock3;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardContent className="flex items-start justify-between p-5">
         <div>
           <p className="text-xs font-medium text-slate-500">{label}</p>
@@ -232,7 +232,7 @@ function ActionDialog({
             onClick={() => onConfirm(comment)}
             className={
               isApproval
-                ? "bg-[#17211f] text-white hover:bg-[#263632]"
+              ? "bg-[#0B4F4A] text-white hover:bg-[#093D38]"
                 : "bg-red-600 text-white hover:bg-red-700"
             }
           >
@@ -355,7 +355,7 @@ export function ApprovalsPage() {
               tone="bg-red-50 text-red-600"
             />
           </section>
-          <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+          <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
             <CardContent className="p-4">
               <div className="mb-4 flex items-center gap-2 text-sm font-medium">
                 <Filter className="size-4 text-slate-400" /> Filter approval
@@ -514,7 +514,7 @@ export function ApprovalsPage() {
               ))}
             </div>
             {filteredItems.length === 0 && (
-              <Card className="border-0 bg-white">
+              <Card className="border-0 bg-white card-hover">
                 <CardContent className="py-14 text-center">
                   <MessageSquare className="mx-auto size-7 text-slate-300" />
                   <p className="mt-3 text-sm font-medium text-slate-600">

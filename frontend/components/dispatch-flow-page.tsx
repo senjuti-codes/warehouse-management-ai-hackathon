@@ -93,7 +93,7 @@ function SummaryCard({
   tone: string;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardContent className="flex items-start justify-between p-5">
         <div>
           <p className="text-xs font-medium text-slate-500">{label}</p>
@@ -129,7 +129,7 @@ function DispatchTimeline({
   });
   const isSelectedRisk = dispatch.risk === "Critical" || dispatch.risk === "High";
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -265,7 +265,7 @@ function DispatchTable({
   onSelect: (record: DispatchRecord) => void;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
         <div className="flex items-center justify-between">
           <div>
@@ -450,7 +450,7 @@ export function DispatchFlowPage() {
               tone="bg-red-50 text-red-600"
             />
           </section>
-          {selectedDelivery ? <DispatchTimeline dispatch={selectedDelivery} /> : <Card className="border-0 bg-white shadow-sm"><CardContent className="p-8 text-center text-sm text-slate-400">No dispatch records are available from the workbook.</CardContent></Card>}
+          {selectedDelivery ? <DispatchTimeline dispatch={selectedDelivery} /> : <Card className="border-0 bg-white shadow-sm card-hover"><CardContent className="p-8 text-center text-sm text-slate-400">No dispatch records are available from the workbook.</CardContent></Card>}
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.7fr)]">
             <div className="space-y-3">
               <div className="flex items-end justify-between">
@@ -510,7 +510,7 @@ export function DispatchFlowPage() {
               />
             </div>
             <div className="space-y-6">
-              <Card className="border-0 bg-[#17211f] text-white shadow-[0_2px_12px_rgba(23,33,31,0.08)]">
+              <Card className="border-0 bg-[#0B4F4A] text-white shadow-[0_2px_12px_rgba(11,79,74,0.08)]">
                 <CardHeader className="border-b border-white/10 px-5 pb-3 pt-5">
                   <div className="flex items-center justify-between">
                     <div>
@@ -547,7 +547,7 @@ export function DispatchFlowPage() {
                   </Link>
                 </CardContent>
               </Card>
-              <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+              <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
                 <CardHeader className="px-5 pb-3 pt-5">
                   <CardTitle>Priority actions</CardTitle>
                   <p className="text-xs text-slate-400">

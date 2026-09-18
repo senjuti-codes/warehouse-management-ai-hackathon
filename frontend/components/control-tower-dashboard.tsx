@@ -72,13 +72,25 @@ function SeverityBadge({
 export function Sidebar({
   activeLabel = "Control Tower",
 }: Readonly<{ activeLabel?: string }>) {
+  const [anomalyCount, setAnomalyCount] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    fetch(`${apiBaseUrl}/api/dashboard`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data && typeof data.totalAnomalies === "number") {
+          setAnomalyCount(String(data.totalAnomalies));
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
   const primaryNavigation = [
     { label: "Control Tower", href: "/", icon: LayoutDashboard },
     {
       label: "Anomaly Queue",
       href: "/anomalies",
       icon: ListChecks,
-      count: "12",
+      count: anomalyCount,
     },
     { label: "Approvals", href: "/approvals", icon: ClipboardCheck },
     { label: "Inventory Health", href: "/?view=inventory-health", icon: Boxes },
@@ -87,13 +99,13 @@ export function Sidebar({
   ];
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col bg-[#17211f] text-white lg:flex">
+    <aside className="hidden w-64 shrink-0 flex-col bg-[#0B4F4A] text-white lg:flex">
       <div className="flex h-20 items-center gap-3 border-b border-white/10 px-7">
         <div className="flex size-9 items-center justify-center rounded-lg bg-[#d8f36b] text-[#17211f]">
           <Warehouse className="size-5" />
         </div>
         <div>
-          <p className="text-sm font-semibold tracking-tight">NEXUS</p>
+          <p className="text-sm font-semibold tracking-tight">VW LogiMind</p>
           <p className="text-[10px] uppercase tracking-[0.2em] text-white/45">
             Warehouse AI
           </p>
@@ -147,7 +159,7 @@ export function Sidebar({
             <span className="size-2 rounded-full bg-[#d8f36b]" /> All systems
             operational
           </div>
-          <p className="mt-2 text-[11px] text-white/40">
+          <p className="mt-2 text-[11px] text-white/65">
             Last sync 2 minutes ago
           </p>
         </div>
@@ -170,7 +182,7 @@ function KpiCard({
   tone: string;
 }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardContent className="p-5">
         <div className="mb-5 flex items-start justify-between">
           <div
@@ -190,17 +202,28 @@ function KpiCard({
   );
 }
 
-function ImpactSection() {
+function ImpactSection({
+  atRiskEuros,
+  potentialDelayHours,
+  recoveryCoveragePercent,
+}: Readonly<{
+  atRiskEuros: number;
+  potentialDelayHours: number;
+  recoveryCoveragePercent: number;
+}>) {
+  const formattedAtRisk = atRiskEuros >= 1000
+    ? `€${(atRiskEuros / 1000).toFixed(1)}k`
+    : `€${atRiskEuros}`;
   return (
-    <Card className="border-0 bg-[#17211f] text-white shadow-[0_2px_12px_rgba(23,33,31,0.08)]">
+    <Card className="border-0 bg-[#0B4F4A] text-white shadow-[0_2px_12px_rgba(11,79,74,0.08)]">
       <CardHeader className="border-b border-white/10 px-5 py-4">
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="text-base text-white">
               Business impact
             </CardTitle>
-            <p className="mt-1 text-xs text-white/45">
-              Estimated value protected by AI interventions
+            <p className="mt-1 text-xs text-white/65">
+              Live figures computed from workbook anomalies
             </p>
           </div>
           <Gauge className="size-5 text-[#d8f36b]" />
@@ -209,21 +232,21 @@ function ImpactSection() {
       <CardContent className="space-y-5 p-5">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <p className="text-xs text-white/45">At-risk inventory</p>
-            <p className="mt-1 text-xl font-semibold">€184.2k</p>
+            <p className="text-xs text-white/65">At-risk inventory</p>
+            <p className="mt-1 text-xl font-semibold">{formattedAtRisk}</p>
           </div>
           <div>
-            <p className="text-xs text-white/45">Potential delay</p>
-            <p className="mt-1 text-xl font-semibold">36 hrs</p>
+            <p className="text-xs text-white/65">Potential delay</p>
+            <p className="mt-1 text-xl font-semibold">{potentialDelayHours} hrs</p>
           </div>
         </div>
         <div>
           <div className="mb-2 flex justify-between text-xs">
             <span className="text-white/55">Recovery coverage</span>
-            <span className="text-[#d8f36b]">78%</span>
+            <span className="text-[#d8f36b]">{recoveryCoveragePercent}%</span>
           </div>
           <Progress
-            value={78}
+            value={recoveryCoveragePercent}
             className="[&_[data-slot=progress-track]]:bg-white/10 [&_[data-slot=progress-indicator]]:bg-[#d8f36b]"
           />
         </div>
@@ -235,10 +258,27 @@ function ImpactSection() {
   );
 }
 
-function RecentActions() {
-  const actions: Array<{ icon: typeof CheckCircle2; label: string; meta: string; color: string }> = [];
+type AuditEvent = {
+  id: number;
+  event_type: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  actor: string | null;
+  summary: string;
+  created_at: string;
+};
+
+const iconForAuditEvent = (eventType: string) => {
+  if (eventType.startsWith('anomaly.approved')) return { icon: CheckCircle2, color: "bg-emerald-50 text-emerald-600" };
+  if (eventType.startsWith('anomaly.rejected')) return { icon: ShieldAlert, color: "bg-red-50 text-red-600" };
+  if (eventType.startsWith('anomaly.ai_analyzed')) return { icon: Sparkles, color: "bg-[#eff8c8] text-[#60751a]" };
+  if (eventType.startsWith('workbook.ingested')) return { icon: Database, color: "bg-blue-50 text-blue-600" };
+  return { icon: Activity, color: "bg-slate-100 text-slate-500" };
+};
+
+function RecentActions({ events }: Readonly<{ events: AuditEvent[] }>) {
   return (
-    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+    <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
         <div className="flex items-center justify-between">
           <CardTitle>Recent AI actions</CardTitle>
@@ -248,27 +288,37 @@ function RecentActions() {
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        <div className="divide-y divide-slate-100">
-          {actions.map(({ icon: Icon, label, meta, color }) => (
-            <div
-              key={label}
-              className="flex items-center gap-3 py-3 first:pt-1 last:pb-0"
-            >
-              <div
-                className={`flex size-8 shrink-0 items-center justify-center rounded-full ${color}`}
-              >
-                <Icon className="size-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-[#17211f]">
-                  {label}
-                </p>
-                <p className="mt-0.5 text-xs text-slate-400">{meta}</p>
-              </div>
-              <CheckCircle2 className="ml-auto size-4 shrink-0 text-emerald-500" />
-            </div>
-          ))}
-        </div>
+        {events.length === 0 ? (
+          <p className="py-6 text-center text-xs text-slate-400">
+            No agent activity yet — run an AI scan to populate the audit trail.
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {events.map((event) => {
+              const { icon: Icon, color } = iconForAuditEvent(event.event_type);
+              return (
+                <div
+                  key={event.id}
+                  className="flex items-center gap-3 py-3 first:pt-1 last:pb-0"
+                >
+                  <div
+                    className={`flex size-8 shrink-0 items-center justify-center rounded-full ${color}`}
+                  >
+                    <Icon className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-[#17211f]">
+                      {event.summary}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {event.actor ?? 'system'} · {new Date(event.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -300,12 +350,16 @@ export function ControlTowerDashboard() {
     business_key?: string;
     created_at?: string;
   }>>([]);
+  const [impact, setImpact] = useState({ atRiskValueEuros: 0, potentialDelayHours: 0, recoveryCoveragePercent: 0 });
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
 
   const loadDashboardData = async () => {
     try {
-      const [dashboardResponse, anomaliesResponse] = await Promise.all([
+      const [dashboardResponse, anomaliesResponse, impactResponse, auditResponse] = await Promise.all([
         fetch(`${apiBaseUrl}/api/dashboard`),
         fetch(`${apiBaseUrl}/api/anomalies`),
+        fetch(`${apiBaseUrl}/api/impact`),
+        fetch(`${apiBaseUrl}/api/audit-log?limit=6`),
       ]);
 
       if (!dashboardResponse.ok || !anomaliesResponse.ok) {
@@ -325,6 +379,18 @@ export function ControlTowerDashboard() {
         sourceTables: Array.isArray(dashboardData.sourceTables) ? dashboardData.sourceTables : [],
       });
       setLiveAnomalies(Array.isArray(anomaliesData) ? anomaliesData : []);
+      if (impactResponse.ok) {
+        const impactData = await impactResponse.json();
+        setImpact({
+          atRiskValueEuros: Number(impactData.atRiskValueEuros ?? 0),
+          potentialDelayHours: Number(impactData.potentialDelayHours ?? 0),
+          recoveryCoveragePercent: Number(impactData.recoveryCoveragePercent ?? 0),
+        });
+      }
+      if (auditResponse.ok) {
+        const auditData = await auditResponse.json();
+        setAuditEvents(Array.isArray(auditData) ? auditData : []);
+      }
     } catch {
       setDashboard({
         totalAnomalies: 0,
@@ -337,6 +403,8 @@ export function ControlTowerDashboard() {
         sourceTables: [],
       });
       setLiveAnomalies([]);
+      setImpact({ atRiskValueEuros: 0, potentialDelayHours: 0, recoveryCoveragePercent: 0 });
+      setAuditEvents([]);
     }
   };
 
@@ -406,7 +474,7 @@ export function ControlTowerDashboard() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "nexus-anomaly-queue.csv";
+    link.download = "vw-logimind-anomaly-queue.csv";
     link.click();
     URL.revokeObjectURL(url);
     setNotice("Anomaly queue exported successfully.");
@@ -511,7 +579,7 @@ export function ControlTowerDashboard() {
               <Button
                 disabled={isScanning}
                 onClick={runScan}
-                className="w-fit bg-[#17211f] text-white hover:bg-[#263632]"
+                className="w-fit bg-[#0B4F4A] text-white hover:bg-[#093D38]"
               >
                 {isScanning ? (
                   <RefreshCw className="animate-spin" />
@@ -538,13 +606,13 @@ export function ControlTowerDashboard() {
                     Last scan: <strong>Just now</strong>
                   </span>
                   <span>
-                    Records analyzed: <strong>48,291</strong>
+                    Records analyzed: <strong>{dashboard.totalRecords.toLocaleString()}</strong>
                   </span>
                   <span>
-                    New anomalies: <strong>3</strong>
+                    Anomalies detected: <strong>{dashboard.totalAnomalies}</strong>
                   </span>
                   <span>
-                    Critical: <strong>1</strong> · High: <strong>2</strong>
+                    Critical: <strong>{dashboard.criticalCount}</strong> · High: <strong>{dashboard.highCount}</strong>
                   </span>
                 </div>
               )}
@@ -581,7 +649,7 @@ export function ControlTowerDashboard() {
             />
           </section>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(330px,0.8fr)]">
-            <Card className="min-w-0 border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+            <Card className="min-w-0 border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
               <CardHeader className="px-5 pb-3 pt-5">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                   <div>
@@ -606,23 +674,23 @@ export function ControlTowerDashboard() {
                     <TabsTrigger value="all">
                       All{" "}
                       <span className="ml-1 text-[10px] text-slate-400">
-                        12
+                        {String(dashboard.totalAnomalies).padStart(2, "0")}
                       </span>
                     </TabsTrigger>
                     <TabsTrigger value="critical">
                       Critical{" "}
-                      <span className="ml-1 text-[10px] text-red-500">07</span>
+                      <span className="ml-1 text-[10px] text-red-500">{String(dashboard.criticalCount).padStart(2, "0")}</span>
                     </TabsTrigger>
                     <TabsTrigger value="high">
                       High{" "}
                       <span className="ml-1 text-[10px] text-orange-500">
-                        23
+                        {String(dashboard.highCount).padStart(2, "0")}
                       </span>
                     </TabsTrigger>
                     <TabsTrigger value="review">
                       Needs review{" "}
                       <span className="ml-1 text-[10px] text-slate-400">
-                        14
+                        {String(dashboard.mediumCount).padStart(2, "0")}
                       </span>
                     </TabsTrigger>
                   </TabsList>
@@ -704,11 +772,17 @@ export function ControlTowerDashboard() {
                 </Tabs>
               </CardContent>
             </Card>
-            {settings.recommendations && <ImpactSection />}
+            {settings.recommendations && (
+              <ImpactSection
+                atRiskEuros={impact.atRiskValueEuros}
+                potentialDelayHours={impact.potentialDelayHours}
+                recoveryCoveragePercent={impact.recoveryCoveragePercent}
+              />
+            )}
           </div>
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-            {settings.recommendations && <RecentActions />}
-            <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)]">
+            {settings.recommendations && <RecentActions events={auditEvents} />}
+            <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
               <CardHeader className="px-5 pb-3 pt-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -731,11 +805,11 @@ export function ControlTowerDashboard() {
                     <div className="flex justify-between text-sm">
                       <span>Data ingest</span>
                       <span className="text-xs text-slate-400">
-                        6 / 6 sources
+                        {dashboard.sourceTables.length} / {dashboard.sourceTables.length} sources
                       </span>
                     </div>
                     <Progress
-                      value={100}
+                      value={dashboard.sourceTables.length ? 100 : 0}
                       className="mt-2 [&_[data-slot=progress-indicator]]:bg-emerald-500"
                     />
                   </div>
@@ -748,11 +822,11 @@ export function ControlTowerDashboard() {
                     <div className="flex justify-between text-sm">
                       <span>AI detection</span>
                       <span className="text-xs text-slate-400">
-                        48,291 records
+                        {dashboard.totalRecords.toLocaleString()} records
                       </span>
                     </div>
                     <Progress
-                      value={94}
+                      value={dashboard.totalRecords ? 100 : 0}
                       className="mt-2 [&_[data-slot=progress-indicator]]:bg-emerald-500"
                     />
                   </div>
@@ -764,10 +838,10 @@ export function ControlTowerDashboard() {
                   <div className="flex-1">
                     <div className="flex justify-between text-sm">
                       <span>Recommendations</span>
-                      <span className="text-xs text-slate-400">14 pending</span>
+                      <span className="text-xs text-slate-400">{dashboard.totalAnomalies} pending</span>
                     </div>
                     <Progress
-                      value={78}
+                      value={dashboard.totalAnomalies ? Math.min(100, impact.recoveryCoveragePercent || 0) : 0}
                       className="mt-2 [&_[data-slot=progress-indicator]]:bg-amber-500"
                     />
                   </div>
