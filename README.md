@@ -1,151 +1,119 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
- 
-## Architecture Overview
- 
-This is a full-stack warehouse anomaly detection and approval system with multi-LLM cascade orchestration:
- 
-- **Backend**: Node.js 24 with native TypeScript (no build step, no Express)
-- **Frontend**: Next.js 16 + React 19 + Tailwind CSS + Turbopack
-- **Database**: SQLite with automatic schema migration
-- **LLM Integration**: VW Group OAuth + gpt-4o with multi-stage cascade
- 
-## Backend API Configuration
- 
-This app communicates with the Node.js backend in `../backend` through the typed client in `lib/api.ts`. Configure the environment:
- 
+# VW LogiMind Warehouse AI
+
+Full-stack warehouse control tower that ingests the supplied Excel workbook, mirrors it into SQLite, detects operational anomalies, and supports AI-assisted triage, investigation, approvals, and workbook actions.
+
+## Stack
+
+- Backend: Node.js 24 native TypeScript HTTP server, SQLite, and ExcelJS
+- Frontend: Next.js 16, React 19, Tailwind CSS 4, Base UI, and Lucide icons
+- AI: VW Group LLMaaS with OAuth token caching and deterministic fallback behavior
+- Data: `data/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL.xlsx`
+
+## Prerequisites
+
+- Node.js 24+
+- npm
+- Docker Desktop only when using Docker Compose
+
+## Local Setup
+
+Install dependencies:
+
 ```bash
-cp .env.local.example .env.local
+npm --prefix backend install
+npm --prefix frontend install
 ```
- 
-Set `NEXT_PUBLIC_API_URL` (defaults to `http://localhost:8000` for local dev):
- 
-```bash
-# Local development (backend running on localhost)
-NEXT_PUBLIC_API_URL=http://localhost:8000
- 
-# Deployed environment (EC2 instance)
-NEXT_PUBLIC_API_URL=http://<EC2-PUBLIC-IP>:8000
+
+Optional environment configuration:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+Copy-Item frontend/.env.local.example frontend/.env.local
 ```
- 
-⚠️ This value is baked in at build time (it's a `NEXT_PUBLIC_*` var), so rebuild the frontend after changing it. Never put LLM/API secret keys here — only the backend talks to the LLM provider.
- 
-## Multi-LLM Cascade Architecture
- 
-The backend implements a 4-stage AI cascade for autonomous anomaly resolution:
- 
-1. **Input Stage**: Workbook ingestion → SQLite mirror
-2. **Detection Stage**: SQL rules (5 deterministic rules) + LLMaaS batch triage
-3. **Triage Stage**: LLMaaS judges auto-fix eligibility and risk level
-4. **Solution Stage**: LLMaaS generates ranked recommendations for manual approval
- 
-### Auto-Fix Decision Logic
- 
-Anomalies auto-approve when:
-- Confidence ≥ 0.85 **AND**
-- Risk level = 'low' **AND**
-- Type = 'reorder-threshold-risk' (heuristic safe category)
- 
-### Fallback Strategy
- 
-If LLMaaS is unreachable, the cascade uses deterministic heuristics per anomaly type:
-- `reorder-threshold-risk`: Auto-fixable (low risk)
-- Others: Routed to Approvals for manual review
- 
-### API Endpoints
- 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/anomalies` | GET | List all anomalies with triage + solution metadata |
-| `/api/dashboard` | GET | KPI summary (total, critical, auto-fixed, pending) |
-| `/api/ai-cascade/run` | POST | Trigger full cascade (triage → auto-fix → solutions) |
-| `/api/anomalies/{id}/decision` | POST | Record approval/rejection decision |
- 
-## Getting Started
- 
-### Terminal 1: Backend Server
- 
+
+The frontend defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_URL` before building to use another backend. LLMaaS credentials are optional. Without them, deterministic detection, recommendations, and assistant fallbacks remain available.
+
+Start the backend and frontend in separate terminals:
+
 ```bash
-cd backend
-npm run dev
-# Runs on http://localhost:8000
-# Watches src/server.ts and auto-reloads on changes
-# Uses Node 24 native TypeScript stripping (--experimental-strip-types)
+npm --prefix backend run dev
+npm --prefix frontend run dev
 ```
- 
-### Terminal 2: Frontend Server
- 
+
+Open `http://localhost:3000`. The backend health endpoint is `http://localhost:8000/health`.
+
+The first **Run AI scan** ingests the workbook and refreshes SQLite. The database is created as `warehouse_ai.sqlite` in the backend process working directory.
+
+## Docker
+
 ```bash
-cd frontend
-npm run dev
-# Runs on http://localhost:3000 (or next available port)
-# Opens http://localhost:3000 in your browser
+docker compose up --build
 ```
- 
-### Terminal 3: Optional Workbook Inspector
- 
-```bash
-cd backend
-npx ts-node src/scripts/inspectWorkbook.ts
-# Analyzes the Excel workbook schema and detected anomalies
-```
- 
-## Pages & Features
- 
-- **Control Tower** (`/`): Dashboard with scan workflow, cascade button, KPI cards
-- **Approvals** (`/approvals`): Review AI recommendations, approve/reject decisions
-- **Anomaly Center** (`/anomalies`): Searchable anomaly queue with filters and details
-- **Approvals Detail** (`/approvals/[id]`): Deep-dive anomaly investigation with LLM analysis
- 
-## Configuration
- 
-Backend environment variables (`.env`):
- 
-```bash
-# LLMaaS Integration
-LLMAAS_BASE_URL=https://llmaas-api.vwgroup.io  # OAuth endpoint
-LLMAAS_API_KEY=your_api_key
+
+Open `http://localhost:3000`. Compose mounts `data/` into the backend and persists SQLite state in the `backend-data` volume. Set `NEXT_PUBLIC_API_URL` in the shell before building when the browser must reach the API at a different public address.
+
+## Product Surfaces
+
+| Surface | Route | Capabilities |
+|---|---|---|
+| Control Tower | `/` | Workbook scan, AI cascade, KPI cards, anomaly queue, impact, audit activity, graphs, and export |
+| Anomaly Center | `/anomalies` | Search, filters, decision status, quick details, and investigation links |
+| Investigation | `/anomalies/{id}` | Workbook evidence and on-demand LLM analysis |
+| Approvals | `/approvals` | Filter recommendations and approve or reject with audit comments |
+| Inventory Health | `/?view=inventory-health` | Material risk, stock health, and replenishment recommendations |
+| Dispatch Flow | `/dispatch-flow` | Dispatch filtering, selectable timelines, and status/risk actions |
+| Vendors | `/?view=vendors` | Enriched supplier performance and risk |
+| Data Sources | `/?view=data-sources` | Workbook table health, sync details, and quality scans |
+| Settings | `/?view=settings` | Monitoring, AI, notification, landing-page, and density preferences |
+
+All surfaces include responsive navigation. Settings and approval state persist in browser storage; operational workbook and audit state persist in SQLite.
+
+## API
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Service health |
+| `POST` | `/api/ingest` | Ingest workbook and run deterministic rules |
+| `GET` | `/api/dashboard` | Record, severity, triage, and decision KPIs |
+| `GET` | `/api/anomalies` | Enriched anomaly queue |
+| `POST` | `/api/anomalies/{id}/decision` | Record operator approval or rejection |
+| `POST` | `/api/anomalies/{id}/ai-analysis` | Generate investigation analysis |
+| `POST` | `/api/ai-cascade/run` | Run batch triage, safe auto-fix, and solution generation |
+| `GET` | `/api/workbook/{table}` | Read a validated workbook mirror table |
+| `GET` | `/api/audit-log` | Read decision, ingestion, and AI activity |
+| `GET` | `/api/impact` | Compute operational impact metrics |
+| `GET` | `/api/correlations` | Find anomaly clusters by business key |
+| `GET` | `/api/vendors/enriched` | Join vendor, purchase, and material signals |
+| `POST` | `/api/assistant` | Ask questions and perform validated workbook actions |
+
+## AI Cascade
+
+The cascade performs batch triage, automatically approves only explicitly safe low-risk reorder-threshold cases at confidence 0.85 or higher, and generates ranked options plus approval checklists for manual review. These safety thresholds are constants in `backend/src/services/cascadeService.ts`.
+
+Configure optional LLMaaS access in `backend/.env`:
+
+```dotenv
+LLMAAS_BASE_URL=https://llmaas-api.vwgroup.io
+LLMAAS_API_KEY=
 LLMAAS_MODEL=gpt-4o
-LLMAAS_IDP_CLIENT_ID=your_client_id
-LLMAAS_IDP_CLIENT_SECRET=your_client_secret
+LLMAAS_IDP_CLIENT_ID=
+LLMAAS_IDP_CLIENT_SECRET=
 LLMAAS_TIMEOUT_MS=30000
- 
-# Workbook Path
-WORKBOOK_PATH=../data/Warehouse_AI_Hackathon_Synthetic_Dataset_FINAL.xlsx
- 
-# Auto-Fix Thresholds (tunable)
-AUTO_FIX_CONFIDENCE_THRESHOLD=0.85
-AUTO_FIX_RISK_CEILING=low
 ```
- 
-## What We Built (Phase 1→2→3)
- 
-### Phase 1: Single LLM On-Demand
-- Manual anomaly investigation via `/anomalies/[id]` page
-- Direct LLMaaS call for each investigation
-- Performance: ~10s per anomaly analysis
- 
-### Phase 2: Batch Triage + Auto-Fix (Current)
-- **New**: Cascade orchestration service (`backend/src/services/cascadeService.ts`)
-- **New**: Batch triage endpoint (`POST /api/ai-cascade/run`)
-- **New**: Auto-fix approval workflow (confidence + risk thresholds)
-- **New**: OAuth token caching (5m TTL, refresh 60s before expiry)
-- Performance: 98 anomalies triaged in 346s (with LLM calls), reconciliation 7ms
-- Result: 6 auto-fixed, 92 routed to Approvals with full AI solutions
- 
-### Phase 3: Multi-Option Solution Generation (Current)
-- **New**: Per-anomaly solution generation with ranked options
-- **New**: Executive summary + root cause + business impact for each anomaly
-- **New**: Approval checklist auto-generated per solution
-- **New**: Decided-by tracking ('ai-auto-fix' vs 'operator' for audit)
- 
-### Performance Optimizations
-- **OAuth Token Caching**: Was causing 5m46s delays (fetching per LLM call) → now milliseconds
-- **Batch Triage**: 20 anomalies per batch to reduce API overhead
-- **Concurrency Limits**: 6 parallel solution generations to avoid LLMaaS throttling
-- **Reconciliation Logic**: Retroactive threshold tuning without re-LLM cost
- 
-## Learn More
- 
-- [Next.js Documentation](https://nextjs.org/docs) - Next.js features
-- [Node.js SQLite](https://nodejs.org/docs/latest/api/sqlite.html) - Native SQLite bindings
-- [Tailwind CSS](https://tailwindcss.com) - Styling framework
+
+Secrets belong only in the backend environment. Never expose them through `NEXT_PUBLIC_*` variables.
+
+## Validation
+
+```bash
+npm --prefix frontend run lint
+npm --prefix frontend run build
+node --experimental-strip-types --check backend/src/server.ts
+node --experimental-strip-types --check backend/src/api.ts
+```
+
+Inspect the workbook schema with:
+
+```bash
+npm --prefix backend run inspect
+```

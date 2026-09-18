@@ -177,6 +177,57 @@ export function Sidebar({
   );
 }
 
+export function MobileNavigation({
+  activeLabel = "Control Tower",
+}: Readonly<{ activeLabel?: string }>) {
+  const [open, setOpen] = useState(false);
+  const navigation = [
+    { label: "Control Tower", href: "/", icon: LayoutDashboard },
+    { label: "Anomaly Queue", href: "/anomalies", icon: ListChecks },
+    { label: "Approvals", href: "/approvals", icon: ClipboardCheck },
+    { label: "Inventory Health", href: "/?view=inventory-health", icon: Boxes },
+    { label: "Dispatch Flow", href: "/dispatch-flow", icon: Truck },
+    { label: "Vendors", href: "/?view=vendors", icon: PackageCheck },
+    { label: "Data Sources", href: "/?view=data-sources", icon: Database },
+    { label: "Settings", href: "/?view=settings", icon: Settings2 },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="lg:hidden"
+        aria-label="Open navigation menu"
+        onClick={() => setOpen(true)}
+      >
+        <Menu />
+      </Button>
+      <DialogContent className="left-4 top-4 w-[min(20rem,calc(100%-2rem))] translate-x-0 translate-y-0 bg-[#0B4F4A] p-3 text-white sm:max-w-xs">
+        <DialogHeader className="px-2 py-3">
+          <DialogTitle className="text-white">VW LogiMind</DialogTitle>
+          <DialogDescription className="text-white/60">
+            Warehouse operations
+          </DialogDescription>
+        </DialogHeader>
+        <nav className="space-y-1">
+          {navigation.map(({ label, href, icon: Icon }) => (
+            <Link
+              key={label}
+              href={href}
+              onClick={() => setOpen(false)}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${label === activeLabel || (activeLabel === "" && label === "Approvals") ? "bg-white/10 font-medium text-[#d8f36b]" : "text-white/70 hover:bg-white/5 hover:text-white"}`}
+            >
+              <Icon className="size-4" />
+              {label}
+            </Link>
+          ))}
+        </nav>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function KpiCard({
   label,
   value,
@@ -291,7 +342,13 @@ function RecentActions({ events }: Readonly<{ events: AuditEvent[] }>) {
       <CardHeader className="px-5 pb-3 pt-5">
         <div className="flex items-center justify-between">
           <CardTitle>Recent AI actions</CardTitle>
-          <Button variant="ghost" size="sm" className="text-xs text-slate-500">
+          <Button
+            render={<Link href="/anomalies" />}
+            nativeButton={false}
+            variant="ghost"
+            size="sm"
+            className="text-xs text-slate-500"
+          >
             View all <ChevronRight />
           </Button>
         </div>
@@ -950,9 +1007,7 @@ export function ControlTowerDashboard() {
       <main className="min-w-0 flex-1">
         <header className="flex h-20 items-center justify-between border-b border-slate-200/80 bg-[#f8faf7] px-5 sm:px-8">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden">
-              <Menu />
-            </Button>
+            <MobileNavigation />
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                 Autonomous Logistics Engine
@@ -1385,7 +1440,13 @@ export function ControlTowerDashboard() {
                       Ingest → Detect → Correlate → Act
                     </p>
                   </div>
-                  <Button variant="ghost" size="icon-sm">
+                  <Button
+                    render={<Link href="/?view=settings" />}
+                    nativeButton={false}
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Open pipeline settings"
+                  >
                     <Settings2 />
                   </Button>
                 </div>

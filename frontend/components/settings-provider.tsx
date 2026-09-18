@@ -54,14 +54,18 @@ export function SettingsProvider({
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      if (stored) setSettings({ ...defaultSettings, ...JSON.parse(stored) });
-    } catch {
-      setSettings(defaultSettings);
-    } finally {
-      setHydrated(true);
-    }
+    const hydrationTask = window.setTimeout(() => {
+      try {
+        const stored = window.localStorage.getItem(storageKey);
+        if (stored) setSettings({ ...defaultSettings, ...JSON.parse(stored) });
+      } catch {
+        setSettings(defaultSettings);
+      } finally {
+        setHydrated(true);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(hydrationTask);
   }, []);
 
   const saveSettings = (nextSettings: SettingsState) => {

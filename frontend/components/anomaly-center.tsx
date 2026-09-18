@@ -4,13 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import {
   AlertCircle,
   Filter,
-  Menu,
   Search,
   ShieldAlert,
   Sparkles,
   X,
 } from "lucide-react"
-import { Sidebar } from "@/components/control-tower-dashboard"
+import { MobileNavigation, Sidebar } from "@/components/control-tower-dashboard"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -250,9 +249,7 @@ export function AnomalyCenter() {
       <main className="min-w-0 flex-1">
         <header className="flex h-20 items-center justify-between border-b border-slate-200/80 bg-[#f8faf7] px-5 sm:px-8">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden">
-              <Menu />
-            </Button>
+            <MobileNavigation activeLabel="Anomaly Queue" />
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                 Operations workspace

@@ -8,16 +8,14 @@ import {
   Boxes,
   CheckCircle2,
   Database,
-  Menu,
   PackageCheck,
   Sparkles,
   Warehouse,
 } from "lucide-react";
 import { type InventoryRisk, type MaterialRisk, type WarehouseHealth } from "@/data/inventory-health";
 import { fetchWorkbookTable } from "@/lib/workbook-api";
-import { Sidebar } from "@/components/control-tower-dashboard";
+import { MobileNavigation, Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress";
@@ -266,9 +264,7 @@ export function InventoryHealthPage() {
       <main className="min-w-0 flex-1">
         <header className="flex h-20 items-center justify-between border-b border-slate-200/80 bg-[#f8faf7] px-5 sm:px-8">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden">
-              <Menu />
-            </Button>
+            <MobileNavigation activeLabel="Inventory Health" />
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                 Inventory intelligence

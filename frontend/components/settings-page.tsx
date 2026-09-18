@@ -1,20 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import {
   Bell,
   BrainCircuit,
   Check,
   Gauge,
-  Menu,
   RotateCcw,
   Save,
   Settings2,
   SlidersHorizontal,
 } from "lucide-react";
-import { Sidebar } from "@/components/control-tower-dashboard";
+import { MobileNavigation, Sidebar } from "@/components/control-tower-dashboard";
 import {
+  defaultSettings,
   useSettings,
   type SettingsState,
 } from "@/components/settings-provider";
@@ -133,11 +133,31 @@ export function SettingsPage() {
     saveSettings,
     resetSettings,
   } = useSettings();
+
+  if (!hydrated) {
+    return null;
+  }
+
+  return (
+    <SettingsForm
+      savedSettings={savedSettings}
+      saveSettings={saveSettings}
+      resetSettings={resetSettings}
+    />
+  );
+}
+
+function SettingsForm({
+  savedSettings,
+  saveSettings,
+  resetSettings,
+}: Readonly<{
+  savedSettings: SettingsState;
+  saveSettings: (settings: SettingsState) => void;
+  resetSettings: () => void;
+}>) {
   const [settings, setSettings] = useState(savedSettings);
   const [saved, setSaved] = useState(false);
-  useEffect(() => {
-    if (hydrated) setSettings(savedSettings);
-  }, [hydrated, savedSettings]);
   const update = <K extends keyof SettingsState>(
     key: K,
     value: SettingsState[K],
@@ -151,6 +171,7 @@ export function SettingsPage() {
   };
   const reset = () => {
     resetSettings();
+    setSettings(defaultSettings);
     setSaved(false);
   };
 
@@ -160,9 +181,7 @@ export function SettingsPage() {
       <main className="min-w-0 flex-1">
         <header className="flex h-20 items-center justify-between border-b border-slate-200/80 bg-[#f8faf7] px-5 sm:px-8">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden">
-              <Menu />
-            </Button>
+            <MobileNavigation activeLabel="Settings" />
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                 Workspace configuration

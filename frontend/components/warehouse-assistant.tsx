@@ -340,7 +340,7 @@ export function WarehouseAssistant() {
                   {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   <span className="sr-only">{isExpanded ? "Collapse assistant" : "Expand assistant"}</span>
                 </Button>
-                <Button type="button" variant="ghost" size="icon-sm" onClick={closeAssistant} className="text-white hover:bg-white/10 hover:text-white">
+                <Button type="button" variant="ghost" size="icon-sm" aria-label="Close assistant" onClick={closeAssistant} className="text-white hover:bg-white/10 hover:text-white">
                   <X className="size-4" />
                 </Button>
               </div>

@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Clock3,
   Filter,
-  Menu,
   MessageSquare,
   Search,
   ShieldCheck,
@@ -19,7 +18,7 @@ import {
 import { type ApprovalItem, type ApprovalStatus } from "@/data/approval-items";
 import { useApprovalItems, useUpdateApproval } from "@/lib/approval-store";
 import { Bot } from "lucide-react";
-import { Sidebar } from "@/components/control-tower-dashboard";
+import { MobileNavigation, Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -319,9 +318,7 @@ export function ApprovalsPage() {
       <main className="min-w-0 flex-1">
         <header className="flex h-20 items-center justify-between border-b border-slate-200/80 bg-[#f8faf7] px-5 sm:px-8">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="lg:hidden">
-              <Menu />
-            </Button>
+            <MobileNavigation activeLabel="" />
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                 Governance workspace
