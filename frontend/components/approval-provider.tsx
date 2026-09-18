@@ -1,13 +1,14 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
-import { type ApprovalItem, type ApprovalStatus } from "@/data/approval-items"
+import { type ApprovalItem, type ApprovalStatus, type SolutionOption, type TriageStatus } from "@/data/approval-items"
 
 type ApprovalState = Record<string, ApprovalItem>
 
 type ApprovalContextValue = {
   items: ApprovalState
   updateApproval: (id: string, status: ApprovalStatus, comment?: string) => void
+  refresh: () => void
 }
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
@@ -24,6 +25,14 @@ type BackendAnomaly = {
   decision_status?: "approved" | "rejected"
   decision_comment?: string | null
   created_at?: string
+  triage_status?: TriageStatus
+  auto_fix_confidence?: number | null
+  risk_level?: "low" | "medium" | "high" | null
+  executive_summary?: string | null
+  ai_business_impact?: string | null
+  solution_options?: SolutionOption[] | null
+  recommended_option?: number | null
+  approval_checklist?: string[] | null
 }
 
 const toApprovalItem = (anomaly: BackendAnomaly): ApprovalItem => ({
@@ -38,12 +47,22 @@ const toApprovalItem = (anomaly: BackendAnomaly): ApprovalItem => ({
   status: anomaly.decision_status === "approved" ? "Approved" : anomaly.decision_status === "rejected" ? "Rejected" : "Pending approval",
   comment: anomaly.decision_comment ?? undefined,
   recommendationSource: anomaly.recommendation_source ?? "deterministic-rule",
+  triageStatus: anomaly.triage_status ?? "not_triaged",
+  autoFixConfidence: anomaly.auto_fix_confidence ?? undefined,
+  riskLevel: anomaly.risk_level ?? undefined,
+  executiveSummary: anomaly.executive_summary ?? undefined,
+  businessImpactDetail: anomaly.ai_business_impact ?? undefined,
+  solutionOptions: anomaly.solution_options ?? undefined,
+  recommendedOption: anomaly.recommended_option ?? undefined,
+  approvalChecklist: anomaly.approval_checklist ?? undefined,
 })
 
 const ApprovalContext = createContext<ApprovalContextValue | null>(null)
 
 export function ApprovalProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [items, setItems] = useState<ApprovalState>({})
+  const [refreshToken, setRefreshToken] = useState(0)
+
   useEffect(() => {
     let active = true
     fetch(`${apiBaseUrl}/api/anomalies`)
@@ -60,7 +79,9 @@ export function ApprovalProvider({ children }: Readonly<{ children: ReactNode }>
     return () => {
       active = false
     }
-  }, [])
+  }, [refreshToken])
+
+  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
 
   const updateApproval = useCallback((id: string, status: ApprovalStatus, comment?: string) => {
     const anomalyId = Number(id.replace("AN-", ""))
@@ -86,7 +107,7 @@ export function ApprovalProvider({ children }: Readonly<{ children: ReactNode }>
     })
   }, [])
 
-  const contextValue = useMemo(() => ({ items, updateApproval }), [items, updateApproval])
+  const contextValue = useMemo(() => ({ items, updateApproval, refresh }), [items, updateApproval, refresh])
 
   return <ApprovalContext.Provider value={contextValue}>{children}</ApprovalContext.Provider>
 }
@@ -107,4 +128,8 @@ export function useApprovalDecision(id: string) {
 
 export function useUpdateApproval() {
   return useApprovalContext().updateApproval
+}
+
+export function useRefreshApprovals() {
+  return useApprovalContext().refresh
 }

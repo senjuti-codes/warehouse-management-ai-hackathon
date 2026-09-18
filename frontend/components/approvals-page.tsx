@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { type ApprovalItem, type ApprovalStatus } from "@/data/approval-items";
 import { useApprovalItems, useUpdateApproval } from "@/lib/approval-store";
+import { Bot } from "lucide-react";
 import { Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,12 +64,20 @@ function SeverityBadge({
   );
 }
 
-function StatusBadge({ status }: Readonly<{ status: ApprovalStatus }>) {
+function StatusBadge({ status, autoFixed }: Readonly<{ status: ApprovalStatus; autoFixed?: boolean }>) {
   const statusIcons = {
     Approved: CheckCircle2,
     Rejected: XCircle,
     "Pending approval": Clock3,
   } as const;
+  if (status === "Approved" && autoFixed) {
+    return (
+      <Badge variant="outline" className="border-[#0B4F4A]/30 bg-[#0B4F4A]/10 text-[#0B4F4A]">
+        <Bot className="size-3" />
+        AI auto-fixed
+      </Badge>
+    );
+  }
   const Icon = statusIcons[status];
   return (
     <Badge variant="outline" className={statusClasses[status]}>
@@ -345,7 +354,14 @@ export function ApprovalsPage() {
               Review rule-based recommendations before corrective action. Generate LLM analysis from an individual investigation when configured.
             </p>
           </section>
-          <section className="grid gap-4 md:grid-cols-3">
+          <section className="grid gap-4 md:grid-cols-4">
+            <QueueSummary
+              label="AI auto-fixed"
+              value={items.filter((item) => item.triageStatus === "auto_fixed").length}
+              detail="Zero human effort"
+              icon={Bot}
+              tone="bg-[#0B4F4A]/10 text-[#0B4F4A]"
+            />
             <QueueSummary
               label="Pending approval"
               value={

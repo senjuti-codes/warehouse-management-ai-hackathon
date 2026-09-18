@@ -4,6 +4,7 @@ import { appConfig } from './config.ts';
 import { ingestWorkbook } from './services/ingestionService.ts';
 import { runDetection } from './services/ruleEngine.ts';
 import { analyzeAnomalyWithLlm } from './services/llmService.ts';
+import { runAiCascade } from './services/cascadeService.ts';
 
 const parseBody = async (req: import('node:http').IncomingMessage) => {
   const chunks: Buffer[] = [];
@@ -109,18 +110,49 @@ export const createApiServer = (port: number) => {
 
     if (req.method === 'GET' && url.pathname === '/api/anomalies') {
       const rows = db.prepare(
-        `SELECT a.*, d.status AS decision_status, d.comment AS decision_comment, d.decided_at
-         FROM anomalies a LEFT JOIN anomaly_decisions d ON d.anomaly_id = a.id
+        `SELECT a.*, d.status AS decision_status, d.comment AS decision_comment, d.decided_at, d.decided_by,
+                t.auto_fixable, t.auto_fix_confidence, t.risk_level, t.reasoning AS triage_reasoning,
+                t.recommended_action AS triage_recommended_action, t.approval_urgency, t.model AS triage_model,
+                s.executive_summary, s.root_cause_analysis, s.business_impact AS ai_business_impact,
+                s.solutions AS solution_options, s.recommended_option, s.approval_checklist
+         FROM anomalies a
+         LEFT JOIN anomaly_decisions d ON d.anomaly_id = a.id
+         LEFT JOIN anomaly_triage t ON t.anomaly_id = a.id
+         LEFT JOIN anomaly_solutions s ON s.anomaly_id = a.id
          ORDER BY a.created_at DESC`,
       ).all() as Array<Record<string, unknown>>;
-      const enriched = rows.map((row) => ({
-        ...row,
-        ...recommendationFor(String(row.type)),
-        recommendation_source: 'deterministic-rule',
-        ai_analysis_available: false,
-      }));
+      const enriched = rows.map((row) => {
+        const hasTriage = row.auto_fixable !== null && row.auto_fixable !== undefined;
+        const triageStatus = !hasTriage
+          ? 'not_triaged'
+          : row.decision_status === 'approved' && row.decided_by === 'ai-auto-fix'
+            ? 'auto_fixed'
+            : 'pending_review';
+        return {
+          ...row,
+          ...recommendationFor(String(row.type)),
+          recommendation_source: 'deterministic-rule',
+          ai_analysis_available: false,
+          triage_status: triageStatus,
+          auto_fixable: hasTriage ? Boolean(row.auto_fixable) : null,
+          solution_options: row.solution_options ? JSON.parse(String(row.solution_options)) : null,
+          approval_checklist: row.approval_checklist ? JSON.parse(String(row.approval_checklist)) : null,
+        };
+      });
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(enriched));
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/ai-cascade/run') {
+      try {
+        const summary = await runAiCascade();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, ...summary }));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: error instanceof Error ? error.message : 'AI cascade failed.' }));
+      }
       return;
     }
 
@@ -129,7 +161,7 @@ export const createApiServer = (port: number) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 1000), 1), 5000);
       const offset = Math.max(Number(url.searchParams.get('offset') ?? 0), 0);
       const allowedName = /^[a-z0-9_]+$/.test(tableName ?? '');
-      const excludedTables = ['workbook_runs', 'anomalies', 'anomaly_decisions'];
+      const excludedTables = ['workbook_runs', 'anomalies', 'anomaly_decisions', 'anomaly_triage', 'anomaly_solutions'];
 
       if (!allowedName || excludedTables.includes(tableName ?? '')) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -172,8 +204,8 @@ export const createApiServer = (port: number) => {
       }
 
       db.prepare(
-        `INSERT INTO anomaly_decisions (anomaly_id, status, comment) VALUES (?, ?, ?)
-         ON CONFLICT(anomaly_id) DO UPDATE SET status = excluded.status, comment = excluded.comment, decided_at = CURRENT_TIMESTAMP`,
+        `INSERT INTO anomaly_decisions (anomaly_id, status, comment, decided_by) VALUES (?, ?, ?, 'operator')
+         ON CONFLICT(anomaly_id) DO UPDATE SET status = excluded.status, comment = excluded.comment, decided_by = 'operator', decided_at = CURRENT_TIMESTAMP`,
       ).run(anomalyId, status, comment);
 
       const anomalyRow = db.prepare('SELECT type, sheet, message, business_key FROM anomalies WHERE id = ?').get(anomalyId) as
@@ -248,8 +280,17 @@ export const createApiServer = (port: number) => {
         'SELECT total_rows FROM workbook_runs ORDER BY id DESC LIMIT 1',
       ).get() as { total_rows?: number } | undefined;
       const sheetCounts = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('workbook_runs','anomalies','anomaly_decisions','audit_log','readme','data_dictionary') ORDER BY name",
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('workbook_runs','anomalies','anomaly_decisions','anomaly_triage','anomaly_solutions','audit_log','readme','data_dictionary') ORDER BY name",
       ).all() as Array<{ name: string }>;
+      const cascadeCounts = db.prepare(
+        `SELECT
+          SUM(CASE WHEN d.decided_by = 'ai-auto-fix' THEN 1 ELSE 0 END) AS auto_fixed_count,
+          SUM(CASE WHEN t.anomaly_id IS NOT NULL AND d.anomaly_id IS NULL THEN 1 ELSE 0 END) AS awaiting_approval_count,
+          SUM(CASE WHEN t.anomaly_id IS NULL THEN 1 ELSE 0 END) AS not_triaged_count
+        FROM anomalies a
+        LEFT JOIN anomaly_triage t ON t.anomaly_id = a.id
+        LEFT JOIN anomaly_decisions d ON d.anomaly_id = a.id;`,
+      ).get() as { auto_fixed_count: number; awaiting_approval_count: number; not_triaged_count: number };
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(
@@ -262,6 +303,9 @@ export const createApiServer = (port: number) => {
           lowCount: Number(severityCounts.low_count ?? 0),
           lastUpdated: severityCounts.last_updated ?? new Date().toISOString(),
           sourceTables: sheetCounts.map((entry) => entry.name),
+          autoFixedCount: Number(cascadeCounts.auto_fixed_count ?? 0),
+          awaitingApprovalCount: Number(cascadeCounts.awaiting_approval_count ?? 0),
+          notTriagedCount: Number(cascadeCounts.not_triaged_count ?? 0),
         }),
       );
       return;
