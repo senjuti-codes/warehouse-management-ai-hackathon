@@ -37,7 +37,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -123,6 +122,8 @@ function FilterSelect({
   onChange: (value: string) => void;
   options: readonly string[];
 }>) {
+  const selectedLabel = value === "all" ? `${label}: All` : `${label}: ${value}`;
+
   return (
     <Select
       value={value}
@@ -132,7 +133,9 @@ function FilterSelect({
         aria-label={label}
         className="w-full border-slate-200 bg-white sm:w-[150px]"
       >
-        <SelectValue placeholder={label} />
+        <span data-slot="select-value" className="flex flex-1 text-left">
+          {selectedLabel}
+        </span>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="all">{label}: All</SelectItem>
@@ -159,6 +162,12 @@ function ActionDialog({
 }>) {
   const [comment, setComment] = useState("");
   const isApproval = mode === "approve";
+
+  const confirmAction = () => {
+    onConfirm(comment);
+    setComment("");
+  };
+
   return (
     <Dialog
       open={Boolean(item && mode)}
@@ -229,7 +238,7 @@ function ActionDialog({
           </DialogClose>
           <Button
             disabled={!isApproval && !comment.trim()}
-            onClick={() => onConfirm(comment)}
+            onClick={confirmAction}
             className={
               isApproval
               ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -275,6 +284,13 @@ export function ApprovalsPage() {
       }),
     [category, items, search, severity, status],
   );
+  const hasActiveFilters = Boolean(search.trim()) || severity !== "all" || category !== "all" || status !== "all";
+  const clearFilters = () => {
+    setSearch("");
+    setSeverity("all");
+    setCategory("all");
+    setStatus("all");
+  };
   const updateStatus = (comment: string) => {
     if (!activeItem || !dialogMode) return;
     const nextStatus: ApprovalStatus =
@@ -357,9 +373,21 @@ export function ApprovalsPage() {
           </section>
           <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
             <CardContent className="p-4">
-              <div className="mb-4 flex items-center gap-2 text-sm font-medium">
-                <Filter className="size-4 text-slate-400" /> Filter approval
-                queue
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Filter className="size-4 text-slate-400" /> Filter approval
+                  queue
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasActiveFilters}
+                  onClick={clearFilters}
+                  className="w-fit border-slate-200 bg-white text-xs"
+                >
+                  <X className="size-3.5" /> Clear filters
+                </Button>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="relative">
@@ -530,6 +558,7 @@ export function ApprovalsPage() {
         </div>
       </main>
       <ActionDialog
+        key={`${activeItem?.id ?? "none"}-${dialogMode ?? "none"}`}
         item={activeItem}
         mode={dialogMode}
         onClose={() => {

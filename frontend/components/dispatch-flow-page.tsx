@@ -30,7 +30,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import {
   Table,
@@ -114,20 +113,25 @@ function SummaryCard({
 
 function DispatchTimeline({
   dispatch,
-}: Readonly<{ dispatch: DispatchRecord }>) {
+  onUpdate,
+}: Readonly<{
+  dispatch: DispatchRecord;
+  onUpdate: (updates: Partial<DispatchRecord>) => void;
+}>) {
   const labels = ["Order confirmed", "Picking", "Packed", "Loaded", "In transit", "Delivered"];
-  const currentStage = dispatch.status === "Ready" ? "Loaded" : dispatch.status === "On schedule" ? "Delivered" : dispatch.status === "Delayed" || dispatch.status === "At risk" ? "In transit" : "In transit";
+  const currentStage = dispatch.status === "Ready" ? "Loaded" : "In transit";
   const currentIndex = labels.indexOf(currentStage);
   const steps = labels.map((label) => {
     let icon: typeof Check | typeof AlertTriangle | null = Check;
     if (label === "Delivered") {
       icon = null;
-    } else if (label === currentStage) {
+    } else if (label === currentStage && (dispatch.status === "Delayed" || dispatch.status === "At risk" || dispatch.risk === "Critical" || dispatch.risk === "High")) {
       icon = AlertTriangle;
     }
     return { label, icon };
   });
   const isSelectedRisk = dispatch.risk === "Critical" || dispatch.risk === "High";
+  const nextStatus: DispatchStatus | null = dispatch.status === "Ready" ? "In transit" : dispatch.status === "In transit" || dispatch.status === "Delayed" || dispatch.status === "At risk" ? "On schedule" : null;
   return (
     <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
@@ -192,8 +196,8 @@ function DispatchTimeline({
               nodeClass = "border-slate-200 bg-white text-slate-300";
               labelClass = "text-slate-400";
             } else if (isCurrent && label !== "Delivered") {
-              nodeClass = "border-red-400 bg-red-50 text-red-600";
-              labelClass = "font-semibold text-red-700";
+              nodeClass = isSelectedRisk ? "border-red-400 bg-red-50 text-red-600" : "border-blue-400 bg-blue-50 text-blue-600";
+              labelClass = isSelectedRisk ? "font-semibold text-red-700" : "font-semibold text-blue-700";
             }
             return (
               <div
@@ -219,6 +223,42 @@ function DispatchTimeline({
             );
           })}
         </div>
+        <div className="mt-6 flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-400">
+            Update the selected delivery workflow for the current control session.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!nextStatus}
+              onClick={() => nextStatus && onUpdate({ status: nextStatus, risk: nextStatus === "On schedule" ? "Low" : dispatch.risk })}
+              className="bg-[#0B4F4A] text-white hover:bg-[#093D38]"
+            >
+              <CheckCircle2 className="size-3.5" />
+              {nextStatus ? `Move to ${nextStatus}` : "Workflow current"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onUpdate({ status: "Delayed", risk: dispatch.risk === "Critical" ? "Critical" : "High" })}
+              className="border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100"
+            >
+              <AlertTriangle className="size-3.5" /> Flag delay
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!isSelectedRisk}
+              onClick={() => onUpdate({ status: "On schedule", risk: "Low" })}
+              className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+            >
+              <Check className="size-3.5" /> Resolve risk
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -235,13 +275,17 @@ function FilterSelect({
   onChange: (value: string) => void;
   options: readonly string[];
 }>) {
+  const selectedLabel = value === "all" ? `${label}: All` : `${label}: ${value}`;
+
   return (
     <Select value={value} onValueChange={(next) => onChange(next ?? "all")}>
       <SelectTrigger
         aria-label={label}
         className="w-full border-slate-200 bg-white sm:w-[145px]"
       >
-        <SelectValue placeholder={label} />
+        <span data-slot="select-value" className="flex flex-1 text-left">
+          {selectedLabel}
+        </span>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="all">{label}: All</SelectItem>
@@ -278,8 +322,9 @@ function DispatchTable({
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
+        <div className="max-h-[430px] overflow-y-auto rounded-lg border border-slate-100 pr-1">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
             <TableRow className="hover:bg-transparent">
               <TableHead>Delivery</TableHead>
               <TableHead>Material</TableHead>
@@ -333,6 +378,12 @@ function DispatchTable({
             ))}
           </TableBody>
         </Table>
+        {records.length === 0 && (
+          <p className="py-10 text-center text-sm text-slate-400">
+            No active dispatches match the current filters.
+          </p>
+        )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -375,8 +426,19 @@ export function DispatchFlowPage() {
           (risk === "all" || record.risk === risk)
         );
       }),
-    [risk, search, status, warehouse],
+    [dispatchRecords, risk, search, status, warehouse],
   );
+  const updateSelectedDispatch = (updates: Partial<DispatchRecord>) => {
+    if (!selectedDelivery) return;
+
+    const updatedRecord = { ...selectedDelivery, ...updates };
+    setSelectedDelivery(updatedRecord);
+    setDispatchRecords((records) =>
+      records.map((record) =>
+        record.delivery === selectedDelivery.delivery ? updatedRecord : record,
+      ),
+    );
+  };
 
   return (
     <div className="flex min-h-screen bg-[#f4f6f3] font-sans text-[#17211f]">
@@ -450,7 +512,7 @@ export function DispatchFlowPage() {
               tone="bg-red-50 text-red-600"
             />
           </section>
-          {selectedDelivery ? <DispatchTimeline dispatch={selectedDelivery} /> : <Card className="border-0 bg-white shadow-sm card-hover"><CardContent className="p-8 text-center text-sm text-slate-400">No dispatch records are available from the workbook.</CardContent></Card>}
+          {selectedDelivery ? <DispatchTimeline dispatch={selectedDelivery} onUpdate={updateSelectedDispatch} /> : <Card className="border-0 bg-white shadow-sm card-hover"><CardContent className="p-8 text-center text-sm text-slate-400">No dispatch records are available from the workbook.</CardContent></Card>}
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.7fr)]">
             <div className="space-y-3">
               <div className="flex items-end justify-between">

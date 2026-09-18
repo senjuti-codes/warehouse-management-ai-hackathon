@@ -137,6 +137,8 @@ function WarehouseHealthCard({
 }
 
 function MaterialRiskTable({ records }: Readonly<{ records: MaterialRisk[] }>) {
+  const safeRecords = records.filter((record): record is MaterialRisk => Boolean(record?.material));
+
   return (
     <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
       <CardHeader className="px-5 pb-3 pt-5">
@@ -151,22 +153,23 @@ function MaterialRiskTable({ records }: Readonly<{ records: MaterialRisk[] }>) {
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        <Table>
-          <TableHeader>
+        <div className="max-h-[430px] overflow-auto rounded-lg border border-slate-100">
+        <Table className="min-w-[920px] table-fixed">
+          <TableHeader className="sticky top-0 z-10 bg-white shadow-[0_1px_0_rgba(226,232,240,0.9)]">
             <TableRow className="hover:bg-transparent">
-              <TableHead>Material</TableHead>
-              <TableHead>Warehouse</TableHead>
-              <TableHead>Available</TableHead>
-              <TableHead>Required</TableHead>
-              <TableHead>Shortfall</TableHead>
-              <TableHead>Risk</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className="w-[28%]">Material</TableHead>
+              <TableHead className="w-[15%]">Warehouse</TableHead>
+              <TableHead className="w-[13%]">Available</TableHead>
+              <TableHead className="w-[13%]">Required</TableHead>
+              <TableHead className="w-[13%]">Shortfall</TableHead>
+              <TableHead className="w-[10%]">Risk</TableHead>
+              <TableHead className="w-[8%] text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {records.map((record) => (
-              <TableRow key={record.material}>
-                <TableCell>
+            {safeRecords.map((record) => (
+              <TableRow key={`${record.material}-${record.warehouse}`}>
+                <TableCell className="whitespace-normal">
                   <p className="font-mono text-xs font-medium text-[#17211f]">
                     {record.material}
                   </p>
@@ -206,6 +209,12 @@ function MaterialRiskTable({ records }: Readonly<{ records: MaterialRisk[] }>) {
             ))}
           </TableBody>
         </Table>
+        {safeRecords.length === 0 && (
+          <p className="py-10 text-center text-sm text-slate-400">
+            No material risks match the current search.
+          </p>
+        )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -236,12 +245,20 @@ export function InventoryHealthPage() {
   const filteredMaterials = useMemo(
     () =>
       materialRisks.filter((record) =>
-        [record.material, record.name, record.warehouse].some((value) =>
+        record && [record.material, record.name, record.warehouse].some((value) =>
           value.toLowerCase().includes(search.toLowerCase()),
         ),
       ),
-    [search],
+    [materialRisks, search],
   );
+  const healthyCount = materialRisks.filter((record) => record.risk === "Low").length;
+  const highRiskCount = materialRisks.filter((record) => record.risk === "High").length;
+  const criticalRiskCount = materialRisks.filter((record) => record.risk === "Critical").length;
+  const totalMaterials = Math.max(materialRisks.length, 1);
+  const healthyPercent = Math.round((healthyCount / totalMaterials) * 100);
+  const highRiskPercent = Math.round((highRiskCount / totalMaterials) * 100);
+  const criticalRiskPercent = Math.round((criticalRiskCount / totalMaterials) * 100);
+  const highRiskEnd = healthyPercent + highRiskPercent;
 
   return (
     <div className="flex min-h-screen bg-[#f4f6f3] font-sans text-[#17211f]">
@@ -316,43 +333,64 @@ export function InventoryHealthPage() {
             />
           </section>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-            <Card className="border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
+            <Card className="overflow-hidden border-0 bg-white shadow-[0_2px_12px_rgba(23,33,31,0.04)] card-hover">
               <CardHeader className="px-5 pb-3 pt-5">
-                <CardTitle>Inventory overview</CardTitle>
-                <p className="text-xs text-slate-400">
-                  Network stock condition
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <CardTitle>Inventory overview</CardTitle>
+                    <p className="text-xs text-slate-400">
+                      Network stock condition
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                    <CheckCircle2 className="size-3" /> Live mix
+                  </Badge>
+                </div>
               </CardHeader>
               <CardContent className="px-5 pb-5">
-                <div className="flex items-center gap-6">
+                <div className="relative rounded-2xl bg-[radial-gradient(circle_at_top_left,rgba(216,243,107,0.28),transparent_42%),linear-gradient(135deg,#f8faf7_0%,#eef5ef_100%)] p-5">
+                  <div className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-sm">
+                    <Boxes className="size-3.5 text-[#839e24]" /> {materialRisks.length} materials
+                  </div>
+                  <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
                   <div
-                    className="relative flex size-32 shrink-0 items-center justify-center rounded-full"
+                    className="relative flex size-40 shrink-0 items-center justify-center rounded-full shadow-[0_18px_42px_rgba(23,33,31,0.12)]"
                     style={{
-                      background:
-                        "conic-gradient(#7fa45b 0 87%, #d5b869 87% 96%, #c96b62 96% 100%)",
+                      background: `conic-gradient(#7fa45b 0 ${healthyPercent}%, #d5b869 ${healthyPercent}% ${highRiskEnd}%, #c96b62 ${highRiskEnd}% 100%)`,
                     }}
                   >
-                    <div className="flex size-24 flex-col items-center justify-center rounded-full bg-white">
-                      <span className="text-2xl font-semibold text-[#17211f]">
-                        87%
+                    <div className="absolute inset-3 rounded-full border border-white/70" />
+                    <div className="flex size-28 flex-col items-center justify-center rounded-full bg-white shadow-inner">
+                      <span className="text-3xl font-semibold text-[#17211f]">
+                        {healthyPercent}%
                       </span>
                       <span className="text-[10px] text-slate-400">
                         healthy
                       </span>
                     </div>
                   </div>
-                  <div className="space-y-3 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="size-2 rounded-full bg-[#7fa45b]" />{" "}
-                      Healthy <span className="font-semibold">87%</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="size-2 rounded-full bg-[#d5b869]" /> At
-                      risk <span className="font-semibold">9%</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="size-2 rounded-full bg-[#c96b62]" />{" "}
-                      Critical <span className="font-semibold">4%</span>
+                    <div className="grid flex-1 gap-3 text-xs">
+                      <div className="rounded-xl bg-white/85 p-3 shadow-sm">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="flex items-center gap-2 font-medium text-slate-600"><span className="size-2.5 rounded-full bg-[#7fa45b]" /> Healthy</span>
+                          <span className="font-semibold text-[#17211f]">{healthyPercent}%</span>
+                        </div>
+                        <Progress value={healthyPercent} className="[&_[data-slot=progress-indicator]]:bg-[#7fa45b]" />
+                      </div>
+                      <div className="rounded-xl bg-white/85 p-3 shadow-sm">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="flex items-center gap-2 font-medium text-slate-600"><span className="size-2.5 rounded-full bg-[#d5b869]" /> At risk</span>
+                          <span className="font-semibold text-[#17211f]">{highRiskPercent}%</span>
+                        </div>
+                        <Progress value={highRiskPercent} className="[&_[data-slot=progress-indicator]]:bg-[#d5b869]" />
+                      </div>
+                      <div className="rounded-xl bg-white/85 p-3 shadow-sm">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="flex items-center gap-2 font-medium text-slate-600"><span className="size-2.5 rounded-full bg-[#c96b62]" /> Critical</span>
+                          <span className="font-semibold text-[#17211f]">{criticalRiskPercent}%</span>
+                        </div>
+                        <Progress value={criticalRiskPercent} className="[&_[data-slot=progress-indicator]]:bg-[#c96b62]" />
+                      </div>
                     </div>
                   </div>
                 </div>

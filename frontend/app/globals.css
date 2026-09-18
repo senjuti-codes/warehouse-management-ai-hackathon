@@ -21,6 +21,28 @@
   .card-hover {
     @apply transition-all duration-200 ease-out border-l-4 border-l-transparent hover:border-l-[#d8f36b] hover:shadow-md hover:-translate-x-0.5;
   }
+
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(216, 243, 107, 0.28) transparent;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: rgba(216, 243, 107, 0.22);
+    border-radius: 999px;
+  }
+
+  .sidebar-scroll:hover::-webkit-scrollbar-thumb {
+    background: rgba(216, 243, 107, 0.42);
+  }
   
   .card-hover-accent {
     @apply transition-all duration-200 ease-out border-l-4 border-l-transparent hover:border-l-emerald-500 hover:shadow-md hover:-translate-x-0.5;
