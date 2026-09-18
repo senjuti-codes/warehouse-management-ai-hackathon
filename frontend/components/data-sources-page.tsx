@@ -13,7 +13,7 @@ import {
   Table2,
 } from "lucide-react";
 import { type DataSourceRecord, type DataSourceStatus } from "@/data/data-sources";
-import { fetchWorkbookTable } from "@/lib/workbook-api";
+import { apiBaseUrl, fetchWorkbookTable, type WorkbookRow } from "@/lib/workbook-api";
 import { Sidebar } from "@/components/control-tower-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,46 @@ const statusClasses: Record<DataSourceStatus, string> = {
   Healthy: "border-emerald-200 bg-emerald-50 text-emerald-700",
   Warning: "border-amber-200 bg-amber-50 text-amber-700",
 };
+
+const dataSourceTables = [
+  ["inventory_stock", "Warehouse inventory"],
+  ["deliveries_dispatch", "Outbound logistics"],
+  ["material_master", "Master data"],
+  ["vendor_master", "Procurement master"],
+  ["warehouse_bin", "Storage capacity"],
+  ["purchase_replenish", "Purchase orders"],
+] as const;
+
+const calculateCoverage = (rows: WorkbookRow[]) => {
+  let totalCells = 0;
+  let populatedCells = 0;
+
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row)) {
+      if (["id", "row_number", "created_at"].includes(key)) continue;
+      totalCells += 1;
+      if (value !== null && String(value).trim() !== "") {
+        populatedCells += 1;
+      }
+    }
+  }
+
+  return totalCells ? Math.round((populatedCells / totalCells) * 100) : 100;
+};
+
+const loadDataSources = async () => Promise.all(dataSourceTables.map(async ([name, type]) => {
+  const result = await fetchWorkbookTable(name);
+  const coveragePercent = calculateCoverage(result.rows);
+
+  return {
+    name,
+    type,
+    records: result.total.toLocaleString(),
+    lastSync: "Current workbook run",
+    status: coveragePercent >= 98 ? "Healthy" : "Warning" as DataSourceStatus,
+    coverage: `${coveragePercent}%`,
+  };
+}));
 
 function SourceStatus({ status }: Readonly<{ status: DataSourceStatus }>) {
   return (
@@ -210,29 +250,17 @@ export function DataSourcesPage() {
   const [dataSources, setDataSources] = useState<DataSourceRecord[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanNotice, setScanNotice] = useState("");
   const [selectedSource, setSelectedSource] = useState<DataSourceRecord | null>(
     null,
   );
   useEffect(() => {
-    const tables = [
-      ["inventory_stock", "Warehouse inventory"],
-      ["deliveries_dispatch", "Outbound logistics"],
-      ["material_master", "Master data"],
-      ["vendor_master", "Procurement master"],
-      ["warehouse_bin", "Storage capacity"],
-      ["purchase_replenish", "Purchase orders"],
-    ] as const;
-    Promise.all(tables.map(async ([name, type]) => {
-      const result = await fetchWorkbookTable(name);
-      return {
-        name,
-        type,
-        records: result.total.toLocaleString(),
-        lastSync: "Current workbook run",
-        status: "Healthy" as DataSourceStatus,
-        coverage: "100%",
-      };
-    })).then(setDataSources).catch(() => setDataSources([]));
+    const loadTimer = window.setTimeout(() => {
+      loadDataSources().then(setDataSources).catch(() => setDataSources([]));
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
   }, []);
   const filteredSources = useMemo(
     () =>
@@ -246,8 +274,35 @@ export function DataSourcesPage() {
           (status === "all" || source.status === status)
         );
       }),
-    [search, status],
+    [dataSources, search, status],
   );
+
+  const runQualityScan = async () => {
+    if (isScanning) return;
+    setIsScanning(true);
+    setScanNotice("Running quality scan...");
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        throw new Error("Quality scan failed");
+      }
+
+      const refreshedSources = await loadDataSources();
+      setDataSources(refreshedSources);
+      const warningCount = refreshedSources.filter((source) => source.status === "Warning").length;
+      setScanNotice(warningCount ? `Quality scan complete: ${warningCount} sources need attention.` : "Quality scan complete: all sources are healthy.");
+    } catch {
+      setScanNotice("Quality scan failed. Check that the backend is running and retry.");
+    } finally {
+      setIsScanning(false);
+    }
+  };
 
   return (
     <>
@@ -394,9 +449,19 @@ export function DataSourcesPage() {
                       snapshot.
                     </p>
                   </div>
-                  <Button className="mt-6 w-full bg-[#d8f36b] text-[#17211f] hover:bg-[#e5fa9d]">
-                    <Sparkles className="size-4" /> Run quality scan
+                  <Button
+                    disabled={isScanning}
+                    onClick={runQualityScan}
+                    className="mt-6 w-full bg-[#d8f36b] text-[#17211f] hover:bg-[#e5fa9d]"
+                  >
+                    {isScanning ? <RefreshCw className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                    {isScanning ? "Scanning data quality..." : "Run quality scan"}
                   </Button>
+                  {scanNotice && (
+                    <output className="mt-3 block text-center text-xs font-medium text-white/70">
+                      {scanNotice}
+                    </output>
+                  )}
                 </CardContent>
               </Card>
             </div>
